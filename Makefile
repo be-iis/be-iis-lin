@@ -53,10 +53,15 @@ prepare-x86:
 prepare-arm64:
 	BEIIS_EXPECT_ARCH=aarch64 bash scripts/prepare.sh
 
-host: check-host-arch
+$(VENV)/bin/python:
 	$(PYTHON) -m venv $(VENV)
 	$(VENV)/bin/python -m pip install -U pip
+
+$(VENV)/.beiis-host-installed: host/pyproject.toml | $(VENV)/bin/python
 	$(VENV)/bin/python -m pip install -e ./host
+	@touch "$@"
+
+host: check-host-arch $(VENV)/.beiis-host-installed
 
 test: host
 	$(VENV)/bin/python -m unittest discover -s host/tests -v
