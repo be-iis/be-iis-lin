@@ -1,0 +1,5 @@
+REPL_MOD_DIR := $(USERMOD_DIR)
+REPL_LIB_DIR := $(REPL_MOD_DIR)/../../../lib/repl_i2c
+SRC_USERMOD += $(REPL_MOD_DIR)/repl_i2c_mphal.c
+SRC_USERMOD += $(REPL_LIB_DIR)/repl_i2c.c
+CFLAGS_USERMOD += -I$(REPL_LIB_DIR)
