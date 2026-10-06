@@ -1,0 +1,14 @@
+BE-IIS LIN HAT software
+Copyright (c) 2026 BE-IIS / Brechel Electronic - Industrial Interface Systems
+
+Original project:
+  BE-IIS LIN HAT
+  https://www.be-iis.eu/
+  https://github.com/be-iis/be-iis-lin
+
+This repository is distributed under the BSD 3-Clause License.
+When redistributing source or binaries, retain the copyright and license
+notices required by LICENSE so that the origin of the software remains clear.
+
+MicroPython is an independent upstream project and is fetched at build time.
+Its own license applies to MicroPython itself.
