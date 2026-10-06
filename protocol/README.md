@@ -1,8 +1,10 @@
-# BE-IIS I2C Raw-REPL transport
+# BE-IIS STM32 I2C transport
 
 Default I2C target address: `0x42`.
 
-The transport exposes two byte FIFOs. It does not interpret Python; the stream is MicroPython REPL traffic.
+The application firmware exposes a byte-pipe used internally for MicroPython Raw
+REPL traffic. Linux applications should normally use `beiis-lind`, not this
+register interface directly.
 
 | Register | Name | Direction | Meaning |
 |---|---|---|---|
@@ -11,10 +13,25 @@ The transport exposes two byte FIFOs. It does not interpret Python; the stream i
 | 0x02 | TX_COUNT | R | bytes waiting in STM->host FIFO, saturated at 255 |
 | 0x10 | RX_DATA | W | append bytes to MicroPython stdin FIFO |
 | 0x20 | TX_DATA | R | pop bytes from MicroPython stdout FIFO |
-| 0x30 | CONTROL | W | bit0 reset FIFOs, bit1 soft-reset request |
-| 0x31 | VERSION | R | protocol version, currently 1 |
+| 0x30 | CONTROL | W | bit0 reset FIFOs; other bits currently reserved |
+| 0x31 | VERSION | R | application transport protocol version, currently 1 |
 
-A write is `[register, payload...]`.
-A read selects a register with a one-byte write, then performs a repeated-start read.
+A write is `[register, payload...]`. A read selects a register with a one-byte
+write, followed by a read transaction.
 
-Above this byte pipe the host enters standard MicroPython Raw REPL (Ctrl-A), sends source and terminates it with Ctrl-D. This intentionally keeps code execution compatible with MicroPython semantics.
+## mboot over I2C
+
+The same I2C address is used by mboot after `machine.bootloader()`. The host
+implementation is in `host/beiis_lin/mboot.py`.
+
+The updater:
+1. identifies the board,
+2. erases only the required application pages,
+3. leaves the first application vector doubleword erased,
+4. writes the remainder of the image,
+5. verifies the invalid-image hash,
+6. programs the original first 8 vector bytes once using MARKVALID,
+7. verifies the final SHA-256,
+8. resets into the application.
+
+The one-shot first-vector flow is required by STM32G0 flash/ECC behaviour.
