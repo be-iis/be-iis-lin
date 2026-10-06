@@ -1,0 +1,6 @@
+LIN_MOD_DIR := $(USERMOD_DIR)
+LIN_LIB_DIR := $(LIN_MOD_DIR)/../../../lib/lin
+SRC_USERMOD += $(LIN_MOD_DIR)/modlin.c
+SRC_USERMOD += $(LIN_LIB_DIR)/lin.c
+SRC_USERMOD += $(LIN_LIB_DIR)/lin_port_stub.c
+CFLAGS_USERMOD += -I$(LIN_LIB_DIR)
