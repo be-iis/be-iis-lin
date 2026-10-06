@@ -1,0 +1,11 @@
+{
+    "deploy": [],
+    "docs": "",
+    "features": ["LIN", "I2C Raw REPL"],
+    "images": [],
+    "mcu": "stm32g0",
+    "product": "BE-IIS LIN HAT",
+    "thumbnail": "",
+    "url": "https://www.be-iis.eu/",
+    "vendor": "BE-IIS"
+}
