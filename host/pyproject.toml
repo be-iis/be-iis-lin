@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beiis-lin"
+version = "0.1.0"
+description = "BE-IIS LIN HAT host tools"
+requires-python = ">=3.10"
+dependencies = ["smbus2>=0.4.3"]
+
+[project.scripts]
+beiis-lin = "beiis_lin.cli:main"
+beiis-lind = "beiis_lin.daemon:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["beiis_lin*"]
