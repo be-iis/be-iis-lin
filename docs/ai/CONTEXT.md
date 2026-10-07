@@ -13,6 +13,8 @@ them from scattered files.
 - Linux host: Python 3 package with CLI + daemon
 - default I2C address: 0x42
 - production daemon socket: /run/beiis/lin-hat.sock
+- daemon transport: local Unix SOCK_SEQPACKET only; no native TCP listener
+- STM32 application transport protocol: v3
 - tested Raspberry Pi IRQ input: GPIO6
 - STM32 IRQ source pin: PC6
 
@@ -33,3 +35,17 @@ the timing engine.
 - initial programming: OpenOCD/ST-Link/SWD
 - field update: Pi I2C/mboot
 - bootloader is intentionally not WRP protected
+
+
+## Runtime invariants
+
+- up to 8 persistent MicroPython application instances
+- 32 application data channels; 0xff reserved for runtime management
+- active instance selected natively through I2C
+- native application controls remain usable while Raw REPL is unavailable:
+  FIFO reset, direct mboot entry, MCU reset
+- STM32->host application FIFO consumption is committed only after an I2C read
+  completes; do not revert to popping bytes when filling TXDR
+- normal host ownership remains beiis-lind; direct I2C is recovery/development
+- LAN tests should use SSH stream-local forwarding unless an authenticated
+  native network transport is deliberately designed
