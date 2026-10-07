@@ -1,6 +1,6 @@
 import unittest
 
-from beiis_lin.ip_bridge import Reassembler, fragment_packet, icmp_echo_reply, internet_checksum
+from bridge import Reassembler, fragment_packet, icmp_echo_reply, internet_checksum
 
 
 def make_echo_request():
