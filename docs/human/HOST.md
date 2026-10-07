@@ -20,11 +20,8 @@ beiis-lind --bus 1 --address 0x42 \
   --lock-file /tmp/beiis-lind.lock
 ```
 
-Install the systemd service:
-
-```sh
-sudo bash scripts/install-daemon.sh
-```
+The repository does not install a systemd service. Start `beiis-lind` explicitly
+when a socket backend is required.
 
 ## CLI
 
