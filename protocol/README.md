@@ -35,3 +35,12 @@ The updater:
 8. resets into the application.
 
 The one-shot first-vector flow is required by STM32G0 flash/ECC behaviour.
+
+
+## Parallel application data transport
+
+The Raw-REPL byte pipe remains unchanged. A second framed transport provides
+long-running MicroPython application instances, 32 user channels, stored apps,
+autostart, active-instance selection and optional tap instances.
+
+See [APP-RUNTIME.md](APP-RUNTIME.md).

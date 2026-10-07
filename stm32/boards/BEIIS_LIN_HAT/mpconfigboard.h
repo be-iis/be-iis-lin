@@ -29,6 +29,11 @@
 #define MICROPY_BOARD_EARLY_INIT    BEIIS_LIN_HAT_board_early_init
 void BEIIS_LIN_HAT_board_early_init(void);
 
+// Frozen boot hook starts the app runtime only when at least one stored
+// instance has autostart enabled. Otherwise normal boot.py/Raw REPL behaviour
+// remains unchanged.
+#define MICROPY_BOARD_FROZEN_BOOT_FILE "beiis_boot.py"
+
 // Enter our own mboot image rather than the STM32 ROM bootloader.
 // 0x70ad0000 is mboot's entry key; the low 7 bits select I2C address 0x42.
 #define MICROPY_BOARD_ENTER_BOOTLOADER(n_args, args) \

@@ -6,6 +6,7 @@
 
 #include "../../lib/lin/lin.h"
 #include "../../lib/repl_i2c/repl_i2c.h"
+#include "../../lib/app_i2c/app_i2c.h"
 
 #define BEIIS_REPL_I2C_ADDR (0x42)
 
@@ -84,6 +85,7 @@ static void beiis_i2c_target_init(void) {
     __HAL_RCC_I2C1_CLK_ENABLE();
 
     beiis_repl_i2c_init();
+    beiis_app_i2c_init();
     i2c_reg = BEIIS_REG_STATUS;
     i2c_expect_reg = 1;
     i2c_payload_index = 0;
@@ -128,6 +130,19 @@ static void i2c_rx_byte(uint8_t v) {
                 beiis_repl_control(v);
             }
             break;
+        case BEIIS_REG_APP_RX_DATA:
+            (void)beiis_app_host_write(&v, 1);
+            break;
+        case BEIIS_REG_APP_CONTROL:
+            if (i2c_payload_index == 0) {
+                beiis_app_control(v);
+            }
+            break;
+        case BEIIS_REG_APP_ACTIVE_INSTANCE:
+            if (i2c_payload_index == 0) {
+                (void)beiis_app_set_active_instance(v);
+            }
+            break;
         default:
             break;
     }
@@ -147,6 +162,21 @@ static uint8_t i2c_tx_byte(void) {
         case BEIIS_REG_TX_COUNT:
         case BEIIS_REG_VERSION:
             v = beiis_repl_reg_read_u8(i2c_reg);
+            break;
+        case BEIIS_REG_APP_TX_DATA:
+            if (beiis_app_host_read(&v, 1) != 1) {
+                v = 0;
+            }
+            break;
+        case BEIIS_REG_APP_RX_FREE:
+        case BEIIS_REG_APP_TX_COUNT:
+        case BEIIS_REG_APP_STATUS:
+        case BEIIS_REG_APP_VERSION:
+        case BEIIS_REG_APP_CHANNELS:
+        case BEIIS_REG_APP_MAX_PAYLOAD_LO:
+        case BEIIS_REG_APP_MAX_PAYLOAD_HI:
+        case BEIIS_REG_APP_ACTIVE_INSTANCE:
+            v = beiis_app_reg_read_u8(i2c_reg);
             break;
         default:
             v = 0;

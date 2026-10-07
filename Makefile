@@ -79,7 +79,7 @@ micropython-submodules: micropython-patch
 	$(MAKE) -C "$(MICROPYTHON_DIR)/ports/stm32" 		BOARD="$(BOARD)" BOARD_DIR="$(BOARD_DIR)" submodules
 
 micropython-build: micropython-submodules
-	$(MAKE) -C "$(MICROPYTHON_DIR)/ports/stm32" 		BOARD="$(BOARD)" 		BOARD_DIR="$(BOARD_DIR)" 		USE_MBOOT=1 		LTO=0 		USER_C_MODULES="$(abspath stm32/micropython/modules)" 		CFLAGS_EXTRA="-DBEIIS_LIN_MODULE_ENABLED=1 -DBEIIS_I2C_REPL_ENABLED=1"
+	$(MAKE) -C "$(MICROPYTHON_DIR)/ports/stm32" 		BOARD="$(BOARD)" 		BOARD_DIR="$(BOARD_DIR)" 		USE_MBOOT=1 		LTO=0 		USER_C_MODULES="$(abspath stm32/micropython/modules)" 		CFLAGS_EXTRA="-DBEIIS_LIN_MODULE_ENABLED=1 -DBEIIS_I2C_REPL_ENABLED=1 -DBEIIS_APP_IO_ENABLED=1"
 
 firmware: micropython-build
 	@test -f "$(FIRMWARE_BIN)"
