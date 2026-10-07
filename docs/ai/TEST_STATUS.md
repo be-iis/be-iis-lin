@@ -22,6 +22,10 @@ Verified on real hardware:
 - application runtime echo data path through 2048-byte payloads
 - application runtime stress test: 1000 echo packets
 - application runtime lifecycle stress: repeated runtime_stop -> Raw REPL -> native reset -> autostart
+- Unix SOCK_SEQPACKET hardware regression through beiis-lind
+- runtime management and application data path through beiis-lind
+- bidirectional LIN1/LIN2 request path through beiis-lind
+- native mboot entry/reset and runtime restore through beiis-lind
 - native APP_CONTROL recovery: STM32 reset and direct mboot entry
 - STM32 PC6 -> isolation -> Pi GPIO6 IRQ hardware path
 
