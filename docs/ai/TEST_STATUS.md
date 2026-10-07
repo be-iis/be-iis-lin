@@ -18,6 +18,11 @@ Verified on real hardware:
 - external LIN master pull-up on LIN1
 - beiis-lind SOCK_SEQPACKET path end-to-end
 - classic and enhanced request through beiis-lind
+- application runtime management RPCs on real hardware
+- application runtime echo data path through 2048-byte payloads
+- application runtime stress test: 1000 echo packets
+- application runtime lifecycle stress: repeated runtime_stop -> Raw REPL -> native reset -> autostart
+- native APP_CONTROL recovery: STM32 reset and direct mboot entry
 - STM32 PC6 -> isolation -> Pi GPIO6 IRQ hardware path
 
 Not yet fully verified/implemented:
