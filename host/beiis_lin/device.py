@@ -81,6 +81,27 @@ class LinHat:
         mboot=self.ensure_mboot()
         mboot.reset()
 
+        # mboot RESET intentionally tears down the bootloader immediately.
+        # Wait until the native application I2C register block is reachable
+        # again, then perform one defined application-side system reset.  This
+        # gives autostart code the same clean boot path as device_reset() and
+        # avoids racing the long-lived daemon against the mboot->application
+        # transition.
+        import time
+        deadline=time.monotonic()+3.0
+        last_error=None
+        while time.monotonic()<deadline:
+            try:
+                caps=self.transport.app_capabilities()
+                if caps.get("protocol_version",0)>=3:
+                    self.transport.app_device_reset()
+                    time.sleep(0.1)
+                    return
+            except (OSError,IndexError) as exc:
+                last_error=exc
+            time.sleep(0.02)
+        raise TimeoutError(f"application did not return after mboot reset: {last_error!r}")
+
     def run_file(self,path:str|Path)->str:
         return self.exec(Path(path).read_text(encoding="utf-8"))
 
