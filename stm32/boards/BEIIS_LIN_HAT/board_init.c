@@ -223,12 +223,14 @@ void I2C1_IRQHandler(void) {
         i2c_rx_byte((uint8_t)I2C1->RXDR);
     }
 
-    if (isr & I2C_ISR_TXIS) {
-        I2C1->TXDR = i2c_tx_byte();
-    }
-
+    // A target-transmit read can present NACKF together with TXIS on the
+    // master's final byte.  NACK must win: servicing TXIS first would pop one
+    // extra byte from the software FIFO even though the master will never clock
+    // it.  That corrupts the following framed APP packet at I2C read boundaries.
     if (isr & I2C_ISR_NACKF) {
         I2C1->ICR = I2C_ICR_NACKCF;
+    } else if (isr & I2C_ISR_TXIS) {
+        I2C1->TXDR = i2c_tx_byte();
     }
 
     if (isr & I2C_ISR_STOPF) {
