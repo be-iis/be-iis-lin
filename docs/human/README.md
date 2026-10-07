@@ -10,3 +10,5 @@ Start here if you are building, flashing, installing or using the BE-IIS LIN HAT
 
 The files in `../ai/` are intentionally machine-oriented context for coding
 agents and are not a replacement for this user documentation.
+
+- `LAN_TEST.md` - secure remote hardware regression over SSH/LAN
