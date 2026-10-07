@@ -1,4 +1,0 @@
-# IP-over-LIN branch: no beiis-lind systemd service.
-#
-# beiis-lind is used only as a manually started Unix-socket backend for
-# diagnostics and for the userspace TUN bridge. Do not install this as a unit.
