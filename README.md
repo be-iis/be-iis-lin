@@ -56,7 +56,7 @@ The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
 - `host/` - Linux daemon, CLI, socket client, I2C transport and tests
 - `stm32/` - board definition, native LIN core, I2C transport and MicroPython integration
 - `protocol/` - STM32 I2C transport documentation
-- `examples/` - scripts intended to run on the STM32
+- `examples/` - isolated usage examples and experiments
 - `scripts/` - preparation, build, test, flashing and installation helpers
 - `docs/human/` - documentation for users and developers
 - `docs/ai/` - concise machine-oriented project context and invariants
@@ -89,10 +89,10 @@ Field update through the Raspberry Pi I2C connection:
 make flash-i2c
 ```
 
-Install the Linux daemon:
+Run the Linux socket daemon manually when needed:
 
 ```sh
-sudo bash scripts/install-daemon.sh
+.venv/bin/beiis-lind
 ```
 
 See `docs/human/` for build, flashing, host and LIN API details. For remote
