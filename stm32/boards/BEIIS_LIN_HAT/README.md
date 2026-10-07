@@ -32,4 +32,4 @@ redirected by the BE-IIS user module to the I2C Raw-REPL byte pipe.
 The I2C target address is fixed for the initial bring-up. Dynamic HAT++ variant
 address selection is intentionally deferred.
 
-All eight LIN LEDs are active-low. Master/slave LEDs indicate the selected channel role; TX/RX LEDs indicate bus activity.
+All eight LIN LEDs are active-low. The slave LED stays on while a slave response is configured. The master LED is on during a master transaction. TX/RX LEDs indicate transmit/receive activity.
