@@ -23,7 +23,7 @@ FIRMWARE_ELF ?= $(FIRMWARE_DIR)/firmware.elf
 FIRMWARE_BIN ?= $(FIRMWARE_DIR)/firmware.bin
 BOOTLOADER_ELF ?= $(BOOTLOADER_DIR)/firmware.elf
 
-.PHONY: all help check-host-arch prepare prepare-x86 prepare-arm64 	host test micropython-fetch micropython-patch micropython-submodules 	micropython-build firmware bootloader firmware-all build 	flash flash-swd flash-all flash-bootloader flash-firmware flash-i2c 	restart install-daemon clean
+.PHONY: all help check-host-arch prepare prepare-x86 prepare-arm64 	host test test-runtime-hw micropython-fetch micropython-patch micropython-submodules 	micropython-build firmware bootloader firmware-all build 	flash flash-swd flash-all flash-bootloader flash-firmware flash-i2c 	restart install-daemon clean
 
 all: host
 
@@ -35,6 +35,7 @@ help:
 	@echo "  make prepare          Install build/runtime dependencies"
 	@echo "  make host             Create venv and install host tools editable"
 	@echo "  make test             Run host unit tests"
+	@echo "  make test-runtime-hw  Run runtime regression on connected hardware"
 	@echo "  make firmware-all     Build mboot + MicroPython application"
 	@echo "  make flash-swd        Initial/full flash via ST-Link + OpenOCD"
 	@echo "  make flash-i2c        Application update via I2C/mboot"
@@ -65,6 +66,9 @@ host: check-host-arch $(VENV)/.beiis-host-installed
 
 test: host
 	$(VENV)/bin/python -m unittest discover -s host/tests -v
+
+test-runtime-hw: host
+	$(VENV)/bin/python scripts/test-runtime-hw.py --bus "$(I2C_BUS)" --address "$(I2C_ADDRESS)"
 
 micropython-fetch:
 	mkdir -p build
