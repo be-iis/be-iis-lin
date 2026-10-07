@@ -135,7 +135,7 @@ def lifecycle_cycles(bus: int, address: int, instance_name: str, cycles: int) ->
         print(f"      cycle {i + 1}/{cycles} OK")
 
 
-def lin_loopback_test(bus: int, address: int) -> None:
+def lin_loopback_test(bus: int, address: int, instance_name: str) -> None:
     print("[5/6] LIN1 <-> LIN2 end-to-end")
     print("      requires LIN1 and LIN2 bus lines to be connected")
     print("      WATCH BOARD: master/TX/RX LEDs should visibly pulse during repeats")
@@ -182,13 +182,22 @@ check(2,1,0x23,b'\x0a\x0b\x0c',False,'LIN2 master -> LIN1 slave classic')
 lin.leds(0)
 print('LIN_LOOPBACK_OK')
 """
-        out = h.exec(code, timeout=15.0)
+        stdout, stderr = h.repl.exec(code, timeout=15.0)
+        if stderr:
+            raise RuntimeError(stderr.decode("utf-8", "replace"))
+        out = stdout.decode("utf-8", "replace")
         if "LIN_LOOPBACK_OK" not in out:
             raise RuntimeError(f"LIN loopback test did not complete: {out!r}")
         for line in out.splitlines():
             print(f"      {line}")
+
+        h.device_reset()
     finally:
         h.close()
+
+    info = wait_runtime(bus, address)
+    require_echo_instance(info, instance_name)
+    print("      runtime restored after LIN test")
 
 
 def led_self_test(bus: int, address: int, instance_name: str) -> None:
@@ -267,7 +276,7 @@ def main() -> int:
         h.close()
 
     lifecycle_cycles(args.bus, args.address, args.instance, args.cycles)
-    lin_loopback_test(args.bus, args.address)
+    lin_loopback_test(args.bus, args.address, args.instance)
     led_self_test(args.bus, args.address, args.instance)
 
     print()
