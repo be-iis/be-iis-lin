@@ -52,7 +52,7 @@ def require_echo_instance(info: dict, name: str) -> dict:
 
 
 def management_stress(h: LinHat, iterations: int) -> None:
-    print(f"[1/4] management RPC stress: {iterations} calls")
+    print(f"[1/5] management RPC stress: {iterations} calls")
     for i in range(iterations):
         selector = i % 4
         if selector == 0:
@@ -77,7 +77,7 @@ def management_stress(h: LinHat, iterations: int) -> None:
 
 
 def payload_boundaries(h: LinHat, slot: int, channel: int) -> None:
-    print("[2/4] payload boundary sweep")
+    print("[2/5] payload boundary sweep")
     for sequence, size in enumerate(DEFAULT_SIZES):
         payload = payload_for(sequence, size)
         h.data_send(channel, payload, timeout=2.0)
@@ -93,7 +93,7 @@ def payload_boundaries(h: LinHat, slot: int, channel: int) -> None:
 
 
 def echo_stress(h: LinHat, slot: int, channel: int, iterations: int) -> None:
-    print(f"[3/4] echo stress: {iterations} packets")
+    print(f"[3/5] echo stress: {iterations} packets")
     for i in range(iterations):
         size = STRESS_SIZES[i % len(STRESS_SIZES)]
         payload = payload_for(10000 + i, size)
@@ -111,7 +111,7 @@ def echo_stress(h: LinHat, slot: int, channel: int, iterations: int) -> None:
 
 
 def lifecycle_cycles(bus: int, address: int, instance_name: str, cycles: int) -> None:
-    print(f"[4/4] runtime stop/reset/autostart cycles: {cycles}")
+    print(f"[4/5] runtime stop/reset/autostart cycles: {cycles}")
     for i in range(cycles):
         h = LinHat(bus, address)
         try:
@@ -133,6 +133,45 @@ def lifecycle_cycles(bus: int, address: int, instance_name: str, cycles: int) ->
         info = wait_runtime(bus, address)
         require_echo_instance(info, instance_name)
         print(f"      cycle {i + 1}/{cycles} OK")
+
+
+def led_self_test(bus: int, address: int, instance_name: str) -> None:
+    print("[5/5] LED GPIO/self-test")
+    print("      WATCH BOARD: each LED will light individually for about 300 ms")
+    h = LinHat(bus, address)
+    try:
+        result = h.runtime_stop()
+        if result is not True:
+            raise RuntimeError(f"runtime_stop before LED test returned {result!r}")
+
+        code = """
+import lin,time
+_names=('LIN1 RX','LIN1 TX','LIN1 SLAVE','LIN1 MASTER','LIN2 RX','LIN2 TX','LIN2 SLAVE','LIN2 MASTER')
+for _i in range(8):
+    _mask=1<<_i
+    _got=lin.leds(_mask)
+    if _got!=_mask:
+        raise RuntimeError('LED mask mismatch: got=%d expected=%d'%(_got,_mask))
+    print(_names[_i])
+    time.sleep_ms(300)
+lin.leds(0)
+if lin.leds()!=0:
+    raise RuntimeError('LEDs did not return to off state')
+print('LED_TEST_OK')
+"""
+        out = h.exec(code)
+        if "LED_TEST_OK" not in out:
+            raise RuntimeError(f"LED self-test did not complete: {out!r}")
+        for line in out.splitlines():
+            print(f"      {line}")
+
+        h.device_reset()
+    finally:
+        h.close()
+
+    info = wait_runtime(bus, address)
+    require_echo_instance(info, instance_name)
+    print("      runtime restored after LED test")
 
 
 def main() -> int:
@@ -172,9 +211,10 @@ def main() -> int:
         h.close()
 
     lifecycle_cycles(args.bus, args.address, args.instance, args.cycles)
+    led_self_test(args.bus, args.address, args.instance)
 
     print()
-    print("PASS: runtime hardware regression completed successfully")
+    print("PASS: runtime + LED hardware regression completed successfully")
     return 0
 
 
