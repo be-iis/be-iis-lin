@@ -39,7 +39,7 @@ the timing engine.
 
 ## Runtime invariants
 
-- up to 8 persistent MicroPython application instances
+- up to 16 persistent MicroPython application instances
 - 32 application data channels; 0xff reserved for runtime management
 - active instance selected natively through I2C
 - native application controls remain usable while Raw REPL is unavailable:
