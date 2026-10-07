@@ -30,12 +30,12 @@ The device remains at the normal application address `0x42`.
 | 0x21 | APP_TX_DATA | R | pop framed application bytes |
 | 0x32 | APP_VERSION | R | application transport version |
 | 0x33 | APP_CHANNELS | R | number of user channels, currently 32 |
-| 0x34 | APP_CONTROL | W | bit0 resets only application FIFOs; bit7 resets the STM32 after the I2C transaction completes |
+| 0x34 | APP_CONTROL | W | bit0 resets only application FIFOs; bit6 enters mboot; bit7 resets the STM32. Reset/bootloader actions occur after the I2C transaction completes |
 | 0x35 | APP_MAX_PAYLOAD_LO | R | payload limit, low byte |
 | 0x36 | APP_MAX_PAYLOAD_HI | R | payload limit, high byte |
 | 0x37 | APP_ACTIVE_INSTANCE | R/W | active application slot 0..7, reset default 0 |
 
-Raw REPL continues to use its original register set. The bit7 `APP_CONTROL` reset is implemented natively and remains available even if the MicroPython runtime or Raw REPL is not responsive.
+Raw REPL continues to use its original register set. The bit6 mboot entry and bit7 reset are implemented natively and remain available even if the MicroPython runtime or Raw REPL is not responsive.
 
 ## Application frame
 
