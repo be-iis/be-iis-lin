@@ -52,7 +52,7 @@ def require_echo_instance(info: dict, name: str) -> dict:
 
 
 def management_stress(h: LinHat, iterations: int) -> None:
-    print(f"[1/5] management RPC stress: {iterations} calls")
+    print(f"[1/6] management RPC stress: {iterations} calls")
     for i in range(iterations):
         selector = i % 4
         if selector == 0:
@@ -77,7 +77,7 @@ def management_stress(h: LinHat, iterations: int) -> None:
 
 
 def payload_boundaries(h: LinHat, slot: int, channel: int) -> None:
-    print("[2/5] payload boundary sweep")
+    print("[2/6] payload boundary sweep")
     for sequence, size in enumerate(DEFAULT_SIZES):
         payload = payload_for(sequence, size)
         h.data_send(channel, payload, timeout=2.0)
@@ -93,7 +93,7 @@ def payload_boundaries(h: LinHat, slot: int, channel: int) -> None:
 
 
 def echo_stress(h: LinHat, slot: int, channel: int, iterations: int) -> None:
-    print(f"[3/5] echo stress: {iterations} packets")
+    print(f"[3/6] echo stress: {iterations} packets")
     for i in range(iterations):
         size = STRESS_SIZES[i % len(STRESS_SIZES)]
         payload = payload_for(10000 + i, size)
@@ -111,7 +111,7 @@ def echo_stress(h: LinHat, slot: int, channel: int, iterations: int) -> None:
 
 
 def lifecycle_cycles(bus: int, address: int, instance_name: str, cycles: int) -> None:
-    print(f"[4/5] runtime stop/reset/autostart cycles: {cycles}")
+    print(f"[4/6] runtime stop/reset/autostart cycles: {cycles}")
     for i in range(cycles):
         h = LinHat(bus, address)
         try:
@@ -135,8 +135,64 @@ def lifecycle_cycles(bus: int, address: int, instance_name: str, cycles: int) ->
         print(f"      cycle {i + 1}/{cycles} OK")
 
 
+def lin_loopback_test(bus: int, address: int) -> None:
+    print("[5/6] LIN1 <-> LIN2 end-to-end")
+    print("      requires LIN1 and LIN2 bus lines to be connected")
+    print("      WATCH BOARD: master/TX/RX LEDs should visibly pulse during repeats")
+
+    h = LinHat(bus, address)
+    try:
+        result = h.runtime_stop()
+        if result is not True:
+            raise RuntimeError(f"runtime_stop before LIN test returned {result!r}")
+
+        code = r"""
+import lin,time,binascii
+
+lin.init(1,19200)
+lin.init(2,19200)
+
+def check(master,slave,frame_id,payload,enhanced,label):
+    lin.slave_set(slave,frame_id,payload,enhanced)
+    slave_bit = 2 if slave == 1 else 6
+    if not (lin.leds() & (1 << slave_bit)):
+        raise RuntimeError(label + ': slave LED state missing')
+
+    got=lin.request(master,frame_id,len(payload),enhanced)
+    if got!=payload:
+        raise RuntimeError(label + ': data mismatch ' + binascii.hexlify(got).decode())
+
+    # Repeat so activity LEDs are visible to a human observer.
+    for _ in range(30):
+        got=lin.request(master,frame_id,len(payload),enhanced)
+        if got!=payload:
+            raise RuntimeError(label + ': repeat mismatch')
+        time.sleep_ms(20)
+
+    lin.slave_clear(slave)
+    if lin.leds() & (1 << slave_bit):
+        raise RuntimeError(label + ': slave LED remained on after clear')
+    print(label + ' OK')
+
+check(1,2,0x12,b'\x11\x22\x33\x44',True, 'LIN1 master -> LIN2 slave enhanced')
+check(1,2,0x13,b'\xa1\xb2\xc3',False,'LIN1 master -> LIN2 slave classic')
+check(2,1,0x22,b'\x55\x66\x77\x88',True, 'LIN2 master -> LIN1 slave enhanced')
+check(2,1,0x23,b'\x0a\x0b\x0c',False,'LIN2 master -> LIN1 slave classic')
+
+lin.leds(0)
+print('LIN_LOOPBACK_OK')
+"""
+        out = h.exec(code, timeout=15.0)
+        if "LIN_LOOPBACK_OK" not in out:
+            raise RuntimeError(f"LIN loopback test did not complete: {out!r}")
+        for line in out.splitlines():
+            print(f"      {line}")
+    finally:
+        h.close()
+
+
 def led_self_test(bus: int, address: int, instance_name: str) -> None:
-    print("[5/5] LED GPIO/self-test")
+    print("[6/6] LED GPIO/self-test")
     print("      WATCH BOARD: each LED will light individually for about 300 ms")
     h = LinHat(bus, address)
     try:
@@ -211,6 +267,7 @@ def main() -> int:
         h.close()
 
     lifecycle_cycles(args.bus, args.address, args.instance, args.cycles)
+    lin_loopback_test(args.bus, args.address)
     led_self_test(args.bus, args.address, args.instance)
 
     print()
