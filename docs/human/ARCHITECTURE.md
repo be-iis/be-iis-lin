@@ -85,37 +85,3 @@ The normal transport is intentionally local. A remote test host can reach the
 same Unix socket through SSH stream-local forwarding. No separate LAN protocol
 is required for this test, so remote testing exercises the production daemon
 protocol without adding an unauthenticated network service.
-
-
-## IP-over-LIN userspace bridge
-
-The IP-over-LIN layer is above the existing Unix socket API.
-
-```text
-Linux IP stack
-    |
-    v
-lin0 (TUN, layer 3)
-    |
-    v
-beiis_lin.ip_bridge
-    |
-    v
-Unix SOCK_SEQPACKET
-    |
-    v
-beiis-lind
-    |
-    v
-existing STM32/LIN transport
-```
-
-The bridge maps the last IPv4 octet directly to the LIN node ID. The master is
-always host `*.1`; slave node `x` is host `*.x`.
-
-There is deliberately no IP-specific I2C register set and no IP-specific STM32
-transport. The bridge converts raw IP packets into ordinary LIN send/request
-operations over the already existing socket API.
-
-The IP-over-LIN branch does not use a beiis-lind systemd service. The socket
-backend is started manually or temporarily by the test helper.
