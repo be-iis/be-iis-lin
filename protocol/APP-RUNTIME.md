@@ -5,7 +5,7 @@ Raw REPL registers and behaviour are intentionally unchanged.
 
 ## Limits
 
-- Up to 8 configured application instances, with stable slots 0 through 7.
+- Up to 16 configured application instances, with stable slots 0 through 15.
 - Exactly one slot is the active owner of the normal Pi data interface; reset default is slot 0.
 - Optional tap instances receive copies without consuming the active owner's data.
 - 32 user data channels: 0 through 31.
@@ -14,7 +14,7 @@ Raw REPL registers and behaviour are intentionally unchanged.
 - Maximum installed Python application file: 64 KiB.
 - Per-instance mailbox depth: 16 messages.
 
-The 8 application instances share one MicroPython interpreter. They are
+The 16 application instances share one MicroPython interpreter. They are
 cooperatively scheduled using `asyncio`; they are not isolated processes.
 
 ## Additional I2C registers
@@ -33,7 +33,7 @@ The device remains at the normal application address `0x42`.
 | 0x34 | APP_CONTROL | W | bit0 resets only application FIFOs; bit6 enters mboot; bit7 resets the STM32. Reset/bootloader actions occur after the I2C transaction completes |
 | 0x35 | APP_MAX_PAYLOAD_LO | R | payload limit, low byte |
 | 0x36 | APP_MAX_PAYLOAD_HI | R | payload limit, high byte |
-| 0x37 | APP_ACTIVE_INSTANCE | R/W | active application slot 0..7, reset default 0 |
+| 0x37 | APP_ACTIVE_INSTANCE | R/W | active application slot 0..15, reset default 0 |
 
 Raw REPL continues to use its original register set. The bit6 mboot entry and bit7 reset are implemented natively and remain available even if the MicroPython runtime or Raw REPL is not responsive.
 
@@ -55,7 +55,7 @@ traffic.
 STM -> Pi:
 
 ```text
-byte 0      source instance (0..7)
+byte 0      source instance (0..15)
 byte 1      channel
 byte 2..3   payload length, little endian
 byte 4..    payload
@@ -100,7 +100,7 @@ Persistent instance configuration is stored in:
 An instance selects an application module, a stable slot, an instance name,
 optional tap channels, optional configuration, optional resource claims, a tap
 flag, and an autostart flag. Multiple instances may use the same application
-module. Slots are allocated from 0 through 7 and remain stable in the stored
+module. Slots are allocated from 0 through 15 and remain stable in the stored
 configuration.
 
 The frozen boot hook starts the runtime only when at least one configured
