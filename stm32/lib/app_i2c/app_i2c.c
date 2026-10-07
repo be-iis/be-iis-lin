@@ -1,4 +1,5 @@
 #include "app_i2c.h"
+#include <stdbool.h>
 
 #if (BEIIS_APP_FIFO_SIZE & (BEIIS_APP_FIFO_SIZE - 1)) != 0
 #error BEIIS_APP_FIFO_SIZE must be a power of two
