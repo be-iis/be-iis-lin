@@ -143,8 +143,8 @@ class I2CBytePipe:
 
     def app_set_active_instance(self,instance:int):
         instance=int(instance)
-        if not 0<=instance<8:
-            raise ValueError("active instance must be 0..7")
+        if not 0<=instance<16:
+            raise ValueError("active instance must be 0..15")
         self._write_reg(REG_APP_ACTIVE_INSTANCE,bytes((instance,)))
 
     def app_reset(self):
