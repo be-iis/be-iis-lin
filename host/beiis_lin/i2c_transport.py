@@ -152,6 +152,12 @@ class I2CBytePipe:
         self._app_bytes.clear()
         self._app_frames.clear()
 
+    def app_device_reset(self):
+        """Reset the STM32 through the native application control register."""
+        self._write_reg(REG_APP_CONTROL,b"\x80")
+        self._app_bytes.clear()
+        self._app_frames.clear()
+
     def _app_extract_frames(self):
         while len(self._app_bytes)>=4:
             instance=self._app_bytes[0]
