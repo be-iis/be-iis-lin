@@ -43,6 +43,7 @@ static lin_slave_ctx_t lin_slave[2];
 static volatile uint8_t i2c_reg;
 static volatile uint8_t i2c_expect_reg = 1;
 static volatile uint8_t i2c_payload_index;
+static volatile bool i2c_system_reset_requested;
 
 static void beiis_gpio_init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -89,6 +90,7 @@ static void beiis_i2c_target_init(void) {
     i2c_reg = BEIIS_REG_STATUS;
     i2c_expect_reg = 1;
     i2c_payload_index = 0;
+    i2c_system_reset_requested = false;
 
     I2C1->CR1 = 0;
     I2C1->CR2 = 0;
@@ -136,6 +138,11 @@ static void i2c_rx_byte(uint8_t v) {
         case BEIIS_REG_APP_CONTROL:
             if (i2c_payload_index == 0) {
                 beiis_app_control(v);
+                if (v & 0x80) {
+                    // Defer reset until STOPF so the current I2C write can
+                    // complete cleanly before the MCU restarts.
+                    i2c_system_reset_requested = true;
+                }
             }
             break;
         case BEIIS_REG_APP_ACTIVE_INSTANCE:
@@ -221,6 +228,10 @@ void I2C1_IRQHandler(void) {
         I2C1->ICR = I2C_ICR_STOPCF;
         i2c_expect_reg = 1;
         i2c_payload_index = 0;
+        if (i2c_system_reset_requested) {
+            i2c_system_reset_requested = false;
+            NVIC_SystemReset();
+        }
     }
 
     uint32_t err = I2C1->ISR;
