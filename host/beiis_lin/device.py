@@ -25,6 +25,17 @@ class LinHat:
         return out.decode("utf-8","replace")
 
     def bootloader(self):
+        # Application protocol v3 adds a native mboot control path which stays
+        # available even when a MicroPython runtime owns the interpreter.
+        try:
+            if self.transport.app_capabilities()["protocol_version"] >= 3:
+                self.transport.app_enter_bootloader()
+                self.transport.wait_for_mboot()
+                return
+        except OSError:
+            pass
+
+        # Compatibility path for older firmware.
         self.repl.exec_detached("import machine; machine.bootloader()")
         self.transport.wait_for_mboot()
 
