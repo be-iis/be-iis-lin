@@ -2,6 +2,7 @@
 
 #include "py/mphal.h"
 #include "irq.h"
+#include "powerctrl.h"
 #include "stm32g0xx_hal.h"
 
 #include "../../lib/lin/lin.h"
@@ -44,6 +45,7 @@ static volatile uint8_t i2c_reg;
 static volatile uint8_t i2c_expect_reg = 1;
 static volatile uint8_t i2c_payload_index;
 static volatile bool i2c_system_reset_requested;
+static volatile bool i2c_mboot_requested;
 
 static void beiis_gpio_init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -91,6 +93,7 @@ static void beiis_i2c_target_init(void) {
     i2c_expect_reg = 1;
     i2c_payload_index = 0;
     i2c_system_reset_requested = false;
+    i2c_mboot_requested = false;
 
     I2C1->CR1 = 0;
     I2C1->CR2 = 0;
@@ -138,7 +141,11 @@ static void i2c_rx_byte(uint8_t v) {
         case BEIIS_REG_APP_CONTROL:
             if (i2c_payload_index == 0) {
                 beiis_app_control(v);
-                if (v & 0x80) {
+                if (v & 0x40) {
+                    // Defer mboot entry until STOPF so the current I2C write
+                    // completes before the application resets into mboot.
+                    i2c_mboot_requested = true;
+                } else if (v & 0x80) {
                     // Defer reset until STOPF so the current I2C write can
                     // complete cleanly before the MCU restarts.
                     i2c_system_reset_requested = true;
@@ -228,6 +235,10 @@ void I2C1_IRQHandler(void) {
         I2C1->ICR = I2C_ICR_STOPCF;
         i2c_expect_reg = 1;
         i2c_payload_index = 0;
+        if (i2c_mboot_requested) {
+            i2c_mboot_requested = false;
+            powerctrl_enter_bootloader(0x70ad0042, 0x08000000);
+        }
         if (i2c_system_reset_requested) {
             i2c_system_reset_requested = false;
             NVIC_SystemReset();
