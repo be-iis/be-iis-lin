@@ -40,6 +40,12 @@ make flash-i2c I2C_BUS=1 I2C_ADDRESS=0x42
 The CLI enters mboot, identifies the board, erases the required application
 pages, writes the image, verifies SHA-256, marks the image valid and resets.
 
+With application transport protocol v3, mboot entry is a native I2C control
+operation. A running/autostart MicroPython runtime does not need to yield Raw
+REPL before a field update. The mboot reset path is followed by a defined
+application-side reset so the persistent runtime autostarts through the same
+clean boot path used by normal recovery.
+
 Direct invocation:
 
 ```sh
