@@ -21,6 +21,11 @@ fi
 # The IP test deliberately uses a temporary socket backend, never a service.
 systemctl disable --now beiis-lind.service 2>/dev/null || true
 
+# Remove the superseded direct-I2C lin0 prototype if it is still loaded from
+# an earlier test. The new lin0 is a TUN interface owned by beiis-lin-ip.
+ip link set lin0 down 2>/dev/null || true
+rmmod beiis_lin_net 2>/dev/null || true
+
 rm -f "$socket" "$lock" "$bridge_log" "$daemon_log"
 
 daemon_pid=""
