@@ -40,6 +40,17 @@ size_t beiis_repl_host_write(const uint8_t *s,size_t len) {
 size_t beiis_repl_host_read(uint8_t *d,size_t len) {
     size_t n=0; while(n<len&&pop(&tx_fifo,&d[n])) n++; return n;
 }
+int beiis_repl_host_peek(size_t offset,uint8_t *value) {
+    uint16_t n=count(&tx_fifo);
+    if(offset>=n) return 0;
+    if(value) *value=tx_fifo.data[(tx_fifo.tail+offset)&(BEIIS_REPL_FIFO_SIZE-1)];
+    return 1;
+}
+size_t beiis_repl_host_consume(size_t len) {
+    size_t n=0; uint8_t discard;
+    while(n<len&&pop(&tx_fifo,&discard)) n++;
+    return n;
+}
 int beiis_repl_stdin_get(void) {
     uint8_t v; return pop(&rx_fifo,&v)?v:-1;
 }
