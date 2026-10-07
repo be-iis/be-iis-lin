@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+example="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$example/../.." && pwd)"
 venv="$root/.venv"
 socket="/tmp/beiis-lin-ip.sock"
 lock="/tmp/beiis-lin-ip.lock"
@@ -9,7 +10,7 @@ bridge_log="/tmp/beiis-lin-ip-bridge.log"
 daemon_log="/tmp/beiis-lin-ip-daemon.log"
 
 if [[ "${EUID}" -ne 0 ]]; then
-  echo "Run as root (normally through: make test-ip-over-lin)" >&2
+  echo "Run as root: sudo examples/ip-over-lin/test-hardware.sh" >&2
   exit 1
 fi
 
@@ -70,7 +71,7 @@ done
   exit 1
 }
 
-"$venv/bin/python" -m beiis_lin.ip_bridge   --socket "$socket"   --ifname lin0   --address "${LIN_LOCAL_IP:-10.42.1.1/24}"   --channel 1   --nodes 2   --wire-loopback   --loopback-slave-channel 2   >"$bridge_log" 2>&1 &
+"$venv/bin/python" "$example/bridge.py"   --socket "$socket"   --ifname lin0   --address "${LIN_LOCAL_IP:-10.42.1.1/24}"   --channel 1   --nodes 2   --wire-loopback   --loopback-slave-channel 2   >"$bridge_log" 2>&1 &
 bridge_pid=$!
 
 for _ in $(seq 1 100); do
