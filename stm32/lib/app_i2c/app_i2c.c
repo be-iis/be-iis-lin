@@ -70,6 +70,26 @@ size_t beiis_app_host_read(uint8_t *dst, size_t len) {
     return done;
 }
 
+int beiis_app_host_peek(size_t offset, uint8_t *value) {
+    uint16_t count = fifo_count(&tx_fifo);
+    if (offset >= count) {
+        return 0;
+    }
+    if (value) {
+        *value = fifo_peek(&tx_fifo, (uint16_t)offset);
+    }
+    return 1;
+}
+
+size_t beiis_app_host_consume(size_t len) {
+    size_t done = 0;
+    uint8_t discard;
+    while (done < len && fifo_pop(&tx_fifo, &discard)) {
+        ++done;
+    }
+    return done;
+}
+
 uint8_t beiis_app_reg_read_u8(uint8_t reg) {
     uint16_t value;
     switch (reg) {
