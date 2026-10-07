@@ -117,6 +117,9 @@ class LinHat:
     def set_active_instance(self,instance:int):
         self.transport.app_set_active_instance(instance)
 
+    def device_reset(self):
+        self.transport.app_device_reset()
+
     def data_send(self,channel:int,data:bytes,timeout:float=2.0):
         self.transport.app_send(int(channel),bytes(data),timeout=timeout)
 
