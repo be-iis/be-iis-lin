@@ -38,7 +38,6 @@ On the remote Linux test host:
 ```sh
 git clone https://github.com/be-iis/be-iis-lin.git
 cd be-iis-lin
-git switch codex/app-runtime
 bash scripts/prepare.sh
 make host
 ```
