@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define BEIIS_APP_PROTOCOL_VERSION 2
+#define BEIIS_APP_PROTOCOL_VERSION 3
 #define BEIIS_APP_FIFO_SIZE 4096
 #define BEIIS_APP_MAX_PAYLOAD 2048
 #define BEIIS_APP_USER_CHANNELS 32
