@@ -46,6 +46,8 @@ static volatile uint8_t i2c_expect_reg = 1;
 static volatile uint8_t i2c_payload_index;
 static volatile bool i2c_system_reset_requested;
 static volatile bool i2c_mboot_requested;
+static volatile bool i2c_tx_stream_active;
+static volatile uint16_t i2c_tx_prefetched;
 
 static void beiis_gpio_init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -94,6 +96,8 @@ static void beiis_i2c_target_init(void) {
     i2c_payload_index = 0;
     i2c_system_reset_requested = false;
     i2c_mboot_requested = false;
+    i2c_tx_stream_active = false;
+    i2c_tx_prefetched = 0;
 
     I2C1->CR1 = 0;
     I2C1->CR2 = 0;
@@ -163,24 +167,36 @@ static void i2c_rx_byte(uint8_t v) {
     ++i2c_payload_index;
 }
 
-static uint8_t i2c_tx_byte(void) {
+static bool i2c_tx_is_stream_reg(void) {
+    return i2c_reg == BEIIS_REG_TX_DATA || i2c_reg == BEIIS_REG_APP_TX_DATA;
+}
+
+static uint8_t i2c_tx_stream_peek(uint16_t offset) {
+    uint8_t v = 0;
+    if (i2c_reg == BEIIS_REG_TX_DATA) {
+        (void)beiis_repl_host_peek(offset, &v);
+    } else if (i2c_reg == BEIIS_REG_APP_TX_DATA) {
+        (void)beiis_app_host_peek(offset, &v);
+    }
+    return v;
+}
+
+static void i2c_tx_stream_consume(uint16_t count) {
+    if (i2c_reg == BEIIS_REG_TX_DATA) {
+        (void)beiis_repl_host_consume(count);
+    } else if (i2c_reg == BEIIS_REG_APP_TX_DATA) {
+        (void)beiis_app_host_consume(count);
+    }
+}
+
+static uint8_t i2c_tx_register_byte(void) {
     uint8_t v = 0;
     switch (i2c_reg) {
-        case BEIIS_REG_TX_DATA:
-            if (beiis_repl_host_read(&v, 1) != 1) {
-                v = 0;
-            }
-            break;
         case BEIIS_REG_STATUS:
         case BEIIS_REG_RX_FREE:
         case BEIIS_REG_TX_COUNT:
         case BEIIS_REG_VERSION:
             v = beiis_repl_reg_read_u8(i2c_reg);
-            break;
-        case BEIIS_REG_APP_TX_DATA:
-            if (beiis_app_host_read(&v, 1) != 1) {
-                v = 0;
-            }
             break;
         case BEIIS_REG_APP_RX_FREE:
         case BEIIS_REG_APP_TX_COUNT:
@@ -206,9 +222,15 @@ void I2C1_IRQHandler(void) {
         bool read = (isr & I2C_ISR_DIR) != 0;
 
         // Flush any byte left in TXDR from the previous read transaction.
-        // Without this, the first byte of every read is one transaction stale.
+        // Stream registers use deferred FIFO consumption: bytes loaded into
+        // TXDR are only peeked here and committed when the read actually ends.
         if (read) {
             I2C1->ISR = I2C_ISR_TXE;
+            i2c_tx_stream_active = i2c_tx_is_stream_reg();
+            i2c_tx_prefetched = 0;
+        } else {
+            i2c_tx_stream_active = false;
+            i2c_tx_prefetched = 0;
         }
 
         I2C1->ICR = I2C_ICR_ADDRCF;
@@ -223,22 +245,56 @@ void I2C1_IRQHandler(void) {
         i2c_rx_byte((uint8_t)I2C1->RXDR);
     }
 
-    // In target-transmit mode STM32 can assert NACKF together with TXIS
-    // after the master's final byte.  TXIS still has to be serviced, otherwise
-    // the peripheral can remain stuck for the next read.  But the requested
-    // byte is only speculative prefetch and must not consume the next byte from
-    // our software FIFO.  Load a disposable byte; the next read ADDR event
-    // flushes TXDR before sending real data.
     if (isr & I2C_ISR_NACKF) {
+        // For a stream read there are two legal timing cases:
+        //
+        // 1. NACKF and TXIS arrive together.  TXIS is asking for the byte
+        //    *after* the final byte, and we have not prefetched it yet.
+        //    Every prefetched byte was therefore actually clocked by the host.
+        //
+        // 2. TXIS was serviced in an earlier IRQ before NACKF became visible.
+        //    In that case the last prefetched byte is speculative and was never
+        //    clocked.  Commit all but that final byte.
+        if (i2c_tx_stream_active) {
+            uint16_t consumed = i2c_tx_prefetched;
+            if (!(isr & I2C_ISR_TXIS) && consumed > 0) {
+                --consumed;
+            }
+            i2c_tx_stream_consume(consumed);
+            i2c_tx_stream_active = false;
+            i2c_tx_prefetched = 0;
+        }
+
         I2C1->ICR = I2C_ICR_NACKCF;
+
+        // TXIS may still require service even though the master has ended the
+        // transfer.  Feed a disposable byte; the next ADDR event flushes TXDR.
         if (isr & I2C_ISR_TXIS) {
             I2C1->TXDR = 0;
         }
     } else if (isr & I2C_ISR_TXIS) {
-        I2C1->TXDR = i2c_tx_byte();
+        if (i2c_tx_stream_active) {
+            I2C1->TXDR = i2c_tx_stream_peek(i2c_tx_prefetched);
+            ++i2c_tx_prefetched;
+        } else {
+            I2C1->TXDR = i2c_tx_register_byte();
+        }
     }
 
     if (isr & I2C_ISR_STOPF) {
+        // Normally target-transmit completion is handled by NACKF.  Keep a
+        // conservative STOP fallback for controllers that terminate a read
+        // without presenting NACKF to this IRQ snapshot.
+        if (i2c_tx_stream_active) {
+            uint16_t consumed = i2c_tx_prefetched;
+            if (consumed > 0) {
+                --consumed;
+            }
+            i2c_tx_stream_consume(consumed);
+            i2c_tx_stream_active = false;
+            i2c_tx_prefetched = 0;
+        }
+
         I2C1->ICR = I2C_ICR_STOPCF;
         i2c_expect_reg = 1;
         i2c_payload_index = 0;
