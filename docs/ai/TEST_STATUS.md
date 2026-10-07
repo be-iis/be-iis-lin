@@ -27,9 +27,12 @@ Verified on real hardware:
 - bidirectional LIN1/LIN2 request path through beiis-lind
 - native mboot entry/reset and runtime restore through beiis-lind
 - native APP_CONTROL recovery: STM32 reset and direct mboot entry
+- all eight LIN status/activity LEDs and GPIO self-test
 - STM32 PC6 -> isolation -> Pi GPIO6 IRQ hardware path
 
 Not yet fully verified/implemented:
+
+- remote LAN regression over SSH stream-local forwarding (test prepared, not yet run)
 
 - LIN2 master pull-up direction as a separate release test
 - alternate baud rates
