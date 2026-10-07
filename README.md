@@ -40,7 +40,7 @@ The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
 - OpenOCD/ST-Link initial programming
 - Linux `beiis-lind` daemon with `SOCK_SEQPACKET`
 - host CLI and Python client
-- persistent multi-instance application runtime (up to 8 instances, 32 data channels)
+- persistent multi-instance application runtime (up to 16 instances, 32 data channels)
 - native runtime recovery: STM32 reset and direct mboot entry over I2C
 - field update through mboot while the MicroPython runtime is active
 - active-low master/slave/TX/RX LEDs for both LIN channels
@@ -111,7 +111,7 @@ https://www.be-iis.eu/
 
 ## MicroPython application runtime
 
-The STM32 can store and autostart up to eight MicroPython application
+The STM32 can store and autostart up to sixteen MicroPython application
 instances. One instance slot is selected as the active owner of the normal
 Pi data interface; optional tap instances receive copies without consuming
 the owner's data. The existing Raw-REPL path remains available separately.
