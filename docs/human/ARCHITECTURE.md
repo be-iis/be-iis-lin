@@ -33,6 +33,9 @@ Linux application / beiis-lin
 ```
 
 The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
+Application-runtime management and framed data share the same physical I2C
+endpoint through a separate native application transport. Raw REPL remains a
+separate recovery/development byte pipe.
 
 ## Hardware mapping
 
@@ -52,3 +55,33 @@ The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
 
 The isolated IRQ path from STM32 PC6 to Raspberry Pi GPIO6 has been verified on
 hardware. The current daemon does not yet use that IRQ for asynchronous events.
+
+
+## Runtime and recovery path
+
+The STM32 application transport supports up to eight stored MicroPython
+instances and 32 user channels. Runtime management uses the reserved management
+channel 0xff. Management replies and application frames are framed atomically on
+the STM32-to-host path.
+
+Application protocol v3 also exposes native recovery controls. The Linux host
+can reset the STM32 or enter mboot without first gaining control of Raw REPL.
+This is important because an autostart runtime intentionally owns the
+MicroPython interpreter.
+
+The STM32 I2C target transmit path defers software-FIFO consumption until the
+host read transaction is complete. This avoids losing a byte when the STM32
+prefetches TXDR before the master's final NACK.
+
+## LIN indication
+
+Each channel has active-low RX, TX, slave and master LEDs. Slave indication
+remains active while a slave response is configured; master indication is active
+during a master transaction. RX/TX indicate bus activity.
+
+## Remote host testing
+
+The normal transport is intentionally local. A remote test host can reach the
+same Unix socket through SSH stream-local forwarding. No separate LAN protocol
+is required for this test, so remote testing exercises the production daemon
+protocol without adding an unauthenticated network service.

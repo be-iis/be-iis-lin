@@ -23,7 +23,7 @@ FIRMWARE_ELF ?= $(FIRMWARE_DIR)/firmware.elf
 FIRMWARE_BIN ?= $(FIRMWARE_DIR)/firmware.bin
 BOOTLOADER_ELF ?= $(BOOTLOADER_DIR)/firmware.elf
 
-.PHONY: all help check-host-arch prepare prepare-x86 prepare-arm64 	host test micropython-fetch micropython-patch micropython-submodules 	micropython-build firmware bootloader firmware-all build 	flash flash-swd flash-all flash-bootloader flash-firmware flash-i2c 	restart install-daemon clean
+.PHONY: all help check-host-arch prepare prepare-x86 prepare-arm64 	host test test-runtime-hw test-socket-hw test-lan-hw micropython-fetch micropython-patch micropython-submodules 	micropython-build firmware bootloader firmware-all build 	flash flash-swd flash-all flash-bootloader flash-firmware flash-i2c 	restart install-daemon clean
 
 all: host
 
@@ -35,6 +35,9 @@ help:
 	@echo "  make prepare          Install build/runtime dependencies"
 	@echo "  make host             Create venv and install host tools editable"
 	@echo "  make test             Run host unit tests"
+	@echo "  make test-runtime-hw  Run runtime regression on connected hardware"
+	@echo "  make test-socket-hw   Run Unix-socket hardware regression"
+	@echo "  make test-lan-hw      Run socket regression over SSH/LAN (LAN_TARGET=user@host)"
 	@echo "  make firmware-all     Build mboot + MicroPython application"
 	@echo "  make flash-swd        Initial/full flash via ST-Link + OpenOCD"
 	@echo "  make flash-i2c        Application update via I2C/mboot"
@@ -66,6 +69,16 @@ host: check-host-arch $(VENV)/.beiis-host-installed
 test: host
 	$(VENV)/bin/python -m unittest discover -s host/tests -v
 
+test-runtime-hw: host
+	$(VENV)/bin/python scripts/test-runtime-hw.py --bus "$(I2C_BUS)" --address "$(I2C_ADDRESS)"
+
+test-socket-hw: host
+	$(VENV)/bin/python scripts/test-socket-hw.py
+
+test-lan-hw: host
+	@test -n "$(LAN_TARGET)" || { echo "Set LAN_TARGET=user@pi-host"; exit 2; }
+	LAN_TARGET="$(LAN_TARGET)" bash scripts/test-lan-hw.sh
+
 micropython-fetch:
 	mkdir -p build
 	test -d "$(MICROPYTHON_DIR)/.git" || git clone https://github.com/micropython/micropython.git "$(MICROPYTHON_DIR)"
@@ -79,7 +92,7 @@ micropython-submodules: micropython-patch
 	$(MAKE) -C "$(MICROPYTHON_DIR)/ports/stm32" 		BOARD="$(BOARD)" BOARD_DIR="$(BOARD_DIR)" submodules
 
 micropython-build: micropython-submodules
-	$(MAKE) -C "$(MICROPYTHON_DIR)/ports/stm32" 		BOARD="$(BOARD)" 		BOARD_DIR="$(BOARD_DIR)" 		USE_MBOOT=1 		LTO=0 		USER_C_MODULES="$(abspath stm32/micropython/modules)" 		CFLAGS_EXTRA="-DBEIIS_LIN_MODULE_ENABLED=1 -DBEIIS_I2C_REPL_ENABLED=1"
+	$(MAKE) -C "$(MICROPYTHON_DIR)/ports/stm32" 		BOARD="$(BOARD)" 		BOARD_DIR="$(BOARD_DIR)" 		USE_MBOOT=1 		LTO=0 		USER_C_MODULES="$(abspath stm32/micropython/modules)" 		CFLAGS_EXTRA="-DBEIIS_LIN_MODULE_ENABLED=1 -DBEIIS_I2C_REPL_ENABLED=1 -DBEIIS_APP_IO_ENABLED=1"
 
 firmware: micropython-build
 	@test -f "$(FIRMWARE_BIN)"

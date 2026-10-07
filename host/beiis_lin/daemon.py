@@ -55,6 +55,34 @@ class LinHatService:
             if op == "flash":
                 return self.device.flash_firmware(str(args["path"]), progress=progress)
 
+            if op == "data_info":
+                return self.device.app_capabilities()
+            if op == "active_instance":
+                return {"active_instance": self.device.active_instance()}
+            if op == "set_active_instance":
+                self.device.set_active_instance(int(args["instance"]))
+                return {"active_instance": self.device.active_instance()}
+            if op == "data_send":
+                self.device.data_send(int(args["channel"]), self._bytes_arg(args))
+                return {"ok": True}
+            if op == "data_recv":
+                instance = args.get("instance")
+                channel = args.get("channel")
+                if instance is not None:
+                    instance = int(instance)
+                if channel is not None:
+                    channel = int(channel)
+                rx_instance, rx_channel, data = self.device.data_recv(
+                    instance=instance, channel=channel, timeout=float(args.get("timeout", 2.0))
+                )
+                return {"instance": rx_instance, "channel": rx_channel, "data": data.hex()}
+            if op == "runtime":
+                return self.device.runtime_call(
+                    str(args["op"]),
+                    args.get("args") or {},
+                    timeout=float(args.get("timeout", 2.0)),
+                )
+
             if op == "lin_init":
                 self.device.lin_init(int(args["channel"]), int(args["baud"]))
                 return {"ok": True}

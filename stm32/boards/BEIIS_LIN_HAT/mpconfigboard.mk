@@ -15,3 +15,8 @@ endif
 
 LTO = 0
 MICROPY_HW_ENABLE_ISR_UART_FLASH_FUNCS_IN_RAM = 1
+
+# Keep asyncio, omit unrelated default DHT/OneWire frozen modules, and add the
+# BE-IIS app runtime. This matters because the application flash region is 320 KiB.
+FROZEN_MANIFEST = $(BOARD_DIR)/manifest.py
+MICROPY_MANIFEST_BEIIS_DIR = $(BOARD_DIR)/frozen

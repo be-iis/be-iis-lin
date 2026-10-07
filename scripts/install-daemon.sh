@@ -20,7 +20,8 @@ ln -sfn "$venv/bin/beiis-lin" /usr/local/bin/beiis-lin
 install -D -m 0644 "$root/host/systemd/beiis-lind.service" /etc/systemd/system/beiis-lind.service
 
 systemctl daemon-reload
-systemctl enable --now beiis-lind.service
+systemctl enable beiis-lind.service
+systemctl restart beiis-lind.service
 systemctl --no-pager --full status beiis-lind.service || true
 
 echo

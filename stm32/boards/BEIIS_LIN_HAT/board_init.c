@@ -2,10 +2,12 @@
 
 #include "py/mphal.h"
 #include "irq.h"
+#include "powerctrl.h"
 #include "stm32g0xx_hal.h"
 
 #include "../../lib/lin/lin.h"
 #include "../../lib/repl_i2c/repl_i2c.h"
+#include "../../lib/app_i2c/app_i2c.h"
 
 #define BEIIS_REPL_I2C_ADDR (0x42)
 
@@ -39,9 +41,66 @@ typedef struct {
 
 static lin_slave_ctx_t lin_slave[2];
 
+static bool lin_led_resolve(uint8_t channel,lin_led_t led,GPIO_TypeDef **port,uint16_t *pin) {
+    if(channel==1) {
+        switch(led) {
+            case LIN_LED_RX:     *port=GPIOA; *pin=GPIO_PIN_5;  return true;
+            case LIN_LED_TX:     *port=GPIOB; *pin=GPIO_PIN_1;  return true;
+            case LIN_LED_SLAVE:  *port=GPIOA; *pin=GPIO_PIN_10; return true;
+            case LIN_LED_MASTER: *port=GPIOA; *pin=GPIO_PIN_6;  return true;
+            default: return false;
+        }
+    }
+    if(channel==2) {
+        switch(led) {
+            case LIN_LED_RX:     *port=GPIOB; *pin=GPIO_PIN_3;  return true;
+            case LIN_LED_TX:     *port=GPIOB; *pin=GPIO_PIN_4;  return true;
+            case LIN_LED_SLAVE:  *port=GPIOB; *pin=GPIO_PIN_5;  return true;
+            case LIN_LED_MASTER: *port=GPIOA; *pin=GPIO_PIN_15; return true;
+            default: return false;
+        }
+    }
+    return false;
+}
+
+void lin_port_led_set(uint8_t channel,lin_led_t led,bool on) {
+    GPIO_TypeDef *port;
+    uint16_t pin;
+    if(!lin_led_resolve(channel,led,&port,&pin)) return;
+    // All board LEDs are active-low (_N).
+    HAL_GPIO_WritePin(port,pin,on?GPIO_PIN_RESET:GPIO_PIN_SET);
+}
+
+void lin_port_led_set_mask(uint8_t mask) {
+    for(uint8_t channel=1;channel<=2;channel++) {
+        for(uint8_t led=0;led<4;led++) {
+            uint8_t bit=(uint8_t)(((channel-1)*4)+led);
+            lin_port_led_set(channel,(lin_led_t)led,(mask&(1u<<bit))!=0);
+        }
+    }
+}
+
+uint8_t lin_port_led_get_mask(void) {
+    uint8_t mask=0;
+    for(uint8_t channel=1;channel<=2;channel++) {
+        for(uint8_t led=0;led<4;led++) {
+            GPIO_TypeDef *port;
+            uint16_t pin;
+            if(!lin_led_resolve(channel,(lin_led_t)led,&port,&pin)) continue;
+            uint8_t bit=(uint8_t)(((channel-1)*4)+led);
+            if((port->ODR&pin)==0) mask|=(uint8_t)(1u<<bit);
+        }
+    }
+    return mask;
+}
+
 static volatile uint8_t i2c_reg;
 static volatile uint8_t i2c_expect_reg = 1;
 static volatile uint8_t i2c_payload_index;
+static volatile bool i2c_system_reset_requested;
+static volatile bool i2c_mboot_requested;
+static volatile bool i2c_tx_stream_active;
+static volatile uint16_t i2c_tx_prefetched;
 
 static void beiis_gpio_init(void) {
     __HAL_RCC_GPIOA_CLK_ENABLE();
@@ -62,6 +121,18 @@ static void beiis_gpio_init(void) {
     g.Pin = GPIO_PIN_2 | GPIO_PIN_3;
     g.Alternate = GPIO_AF1_USART2;
     HAL_GPIO_Init(GPIOA, &g);
+
+    // Active-low LIN status/activity LEDs. Initialise all LEDs off.
+    g.Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &g);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15, GPIO_PIN_SET);
+
+    g.Pin = GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    HAL_GPIO_Init(GPIOB, &g);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5, GPIO_PIN_SET);
 
     // TJA1021 /SLP pins. High = normal mode, low = sleep.
     g.Pin = GPIO_PIN_4 | GPIO_PIN_8;
@@ -84,9 +155,14 @@ static void beiis_i2c_target_init(void) {
     __HAL_RCC_I2C1_CLK_ENABLE();
 
     beiis_repl_i2c_init();
+    beiis_app_i2c_init();
     i2c_reg = BEIIS_REG_STATUS;
     i2c_expect_reg = 1;
     i2c_payload_index = 0;
+    i2c_system_reset_requested = false;
+    i2c_mboot_requested = false;
+    i2c_tx_stream_active = false;
+    i2c_tx_prefetched = 0;
 
     I2C1->CR1 = 0;
     I2C1->CR2 = 0;
@@ -128,25 +204,74 @@ static void i2c_rx_byte(uint8_t v) {
                 beiis_repl_control(v);
             }
             break;
+        case BEIIS_REG_APP_RX_DATA:
+            (void)beiis_app_host_write(&v, 1);
+            break;
+        case BEIIS_REG_APP_CONTROL:
+            if (i2c_payload_index == 0) {
+                beiis_app_control(v);
+                if (v & 0x40) {
+                    // Defer mboot entry until STOPF so the current I2C write
+                    // completes before the application resets into mboot.
+                    i2c_mboot_requested = true;
+                } else if (v & 0x80) {
+                    // Defer reset until STOPF so the current I2C write can
+                    // complete cleanly before the MCU restarts.
+                    i2c_system_reset_requested = true;
+                }
+            }
+            break;
+        case BEIIS_REG_APP_ACTIVE_INSTANCE:
+            if (i2c_payload_index == 0) {
+                (void)beiis_app_set_active_instance(v);
+            }
+            break;
         default:
             break;
     }
     ++i2c_payload_index;
 }
 
-static uint8_t i2c_tx_byte(void) {
+static bool i2c_tx_is_stream_reg(void) {
+    return i2c_reg == BEIIS_REG_TX_DATA || i2c_reg == BEIIS_REG_APP_TX_DATA;
+}
+
+static uint8_t i2c_tx_stream_peek(uint16_t offset) {
+    uint8_t v = 0;
+    if (i2c_reg == BEIIS_REG_TX_DATA) {
+        (void)beiis_repl_host_peek(offset, &v);
+    } else if (i2c_reg == BEIIS_REG_APP_TX_DATA) {
+        (void)beiis_app_host_peek(offset, &v);
+    }
+    return v;
+}
+
+static void i2c_tx_stream_consume(uint16_t count) {
+    if (i2c_reg == BEIIS_REG_TX_DATA) {
+        (void)beiis_repl_host_consume(count);
+    } else if (i2c_reg == BEIIS_REG_APP_TX_DATA) {
+        (void)beiis_app_host_consume(count);
+    }
+}
+
+static uint8_t i2c_tx_register_byte(void) {
     uint8_t v = 0;
     switch (i2c_reg) {
-        case BEIIS_REG_TX_DATA:
-            if (beiis_repl_host_read(&v, 1) != 1) {
-                v = 0;
-            }
-            break;
         case BEIIS_REG_STATUS:
         case BEIIS_REG_RX_FREE:
         case BEIIS_REG_TX_COUNT:
         case BEIIS_REG_VERSION:
             v = beiis_repl_reg_read_u8(i2c_reg);
+            break;
+        case BEIIS_REG_APP_RX_FREE:
+        case BEIIS_REG_APP_TX_COUNT:
+        case BEIIS_REG_APP_STATUS:
+        case BEIIS_REG_APP_VERSION:
+        case BEIIS_REG_APP_CHANNELS:
+        case BEIIS_REG_APP_MAX_PAYLOAD_LO:
+        case BEIIS_REG_APP_MAX_PAYLOAD_HI:
+        case BEIIS_REG_APP_ACTIVE_INSTANCE:
+            v = beiis_app_reg_read_u8(i2c_reg);
             break;
         default:
             v = 0;
@@ -162,9 +287,15 @@ void I2C1_IRQHandler(void) {
         bool read = (isr & I2C_ISR_DIR) != 0;
 
         // Flush any byte left in TXDR from the previous read transaction.
-        // Without this, the first byte of every read is one transaction stale.
+        // Stream registers use deferred FIFO consumption: bytes loaded into
+        // TXDR are only peeked here and committed when the read actually ends.
         if (read) {
             I2C1->ISR = I2C_ISR_TXE;
+            i2c_tx_stream_active = i2c_tx_is_stream_reg();
+            i2c_tx_prefetched = 0;
+        } else {
+            i2c_tx_stream_active = false;
+            i2c_tx_prefetched = 0;
         }
 
         I2C1->ICR = I2C_ICR_ADDRCF;
@@ -179,18 +310,67 @@ void I2C1_IRQHandler(void) {
         i2c_rx_byte((uint8_t)I2C1->RXDR);
     }
 
-    if (isr & I2C_ISR_TXIS) {
-        I2C1->TXDR = i2c_tx_byte();
-    }
-
     if (isr & I2C_ISR_NACKF) {
+        // For a stream read there are two legal timing cases:
+        //
+        // 1. NACKF and TXIS arrive together.  TXIS is asking for the byte
+        //    *after* the final byte, and we have not prefetched it yet.
+        //    Every prefetched byte was therefore actually clocked by the host.
+        //
+        // 2. TXIS was serviced in an earlier IRQ before NACKF became visible.
+        //    In that case the last prefetched byte is speculative and was never
+        //    clocked.  Commit all but that final byte.
+        if (i2c_tx_stream_active) {
+            uint16_t consumed = i2c_tx_prefetched;
+            if (!(isr & I2C_ISR_TXIS) && consumed > 0) {
+                --consumed;
+            }
+            i2c_tx_stream_consume(consumed);
+            i2c_tx_stream_active = false;
+            i2c_tx_prefetched = 0;
+        }
+
         I2C1->ICR = I2C_ICR_NACKCF;
+
+        // TXIS may still require service even though the master has ended the
+        // transfer.  Feed a disposable byte; the next ADDR event flushes TXDR.
+        if (isr & I2C_ISR_TXIS) {
+            I2C1->TXDR = 0;
+        }
+    } else if (isr & I2C_ISR_TXIS) {
+        if (i2c_tx_stream_active) {
+            I2C1->TXDR = i2c_tx_stream_peek(i2c_tx_prefetched);
+            ++i2c_tx_prefetched;
+        } else {
+            I2C1->TXDR = i2c_tx_register_byte();
+        }
     }
 
     if (isr & I2C_ISR_STOPF) {
+        // Normally target-transmit completion is handled by NACKF.  Keep a
+        // conservative STOP fallback for controllers that terminate a read
+        // without presenting NACKF to this IRQ snapshot.
+        if (i2c_tx_stream_active) {
+            uint16_t consumed = i2c_tx_prefetched;
+            if (consumed > 0) {
+                --consumed;
+            }
+            i2c_tx_stream_consume(consumed);
+            i2c_tx_stream_active = false;
+            i2c_tx_prefetched = 0;
+        }
+
         I2C1->ICR = I2C_ICR_STOPCF;
         i2c_expect_reg = 1;
         i2c_payload_index = 0;
+        if (i2c_mboot_requested) {
+            i2c_mboot_requested = false;
+            powerctrl_enter_bootloader(0x70ad0042, 0x08000000);
+        }
+        if (i2c_system_reset_requested) {
+            i2c_system_reset_requested = false;
+            NVIC_SystemReset();
+        }
     }
 
     uint32_t err = I2C1->ISR;
@@ -298,6 +478,8 @@ int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len
     ctx->tx_pos = 0;
     ctx->state = LIN_SLAVE_WAIT_BREAK;
     ctx->enabled = true;
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    lin_port_led_set(channel,LIN_LED_TX,false);
 
     USART_TypeDef *u = h->Instance;
     u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
@@ -321,6 +503,8 @@ int lin_port_slave_clear(uint8_t channel) {
     ctx->state = LIN_SLAVE_WAIT_BREAK;
     ctx->tx_len = 0;
     ctx->tx_pos = 0;
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    lin_port_led_set(channel,LIN_LED_TX,false);
 
     h->Instance->CR2 &= ~USART_CR2_LBDIE;
     h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE);
@@ -347,6 +531,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
 
     if (isr & USART_ISR_LBDF) {
         u->ICR = USART_ICR_LBDCF;
+        lin_port_led_set(channel,LIN_LED_RX,true);
         ctx->state = LIN_SLAVE_WAIT_SYNC;
         ctx->tx_pos = 0;
         ctx->tx_len = 0;
@@ -357,6 +542,9 @@ void beiis_lin_uart_irq(uint8_t channel) {
 
         if (ctx->state == LIN_SLAVE_WAIT_SYNC) {
             ctx->state = (v == 0x55) ? LIN_SLAVE_WAIT_PID : LIN_SLAVE_WAIT_BREAK;
+            if(ctx->state==LIN_SLAVE_WAIT_BREAK) {
+                lin_port_led_set(channel,LIN_LED_RX,false);
+            }
         } else if (ctx->state == LIN_SLAVE_WAIT_PID) {
             if (lin_pid_valid(v) && ((v & 0x3f) == ctx->id)) {
                 memcpy(ctx->tx, ctx->data, ctx->len);
@@ -364,6 +552,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
                 ctx->tx_len = ctx->len + 1;
                 ctx->tx_pos = 0;
                 ctx->state = LIN_SLAVE_TX;
+                lin_port_led_set(channel,LIN_LED_TX,true);
 
                 // Arm TXE interrupt only. Do not write TDR here because
                 // 'isr' is a snapshot from before the PID was processed; using
@@ -372,6 +561,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
             } else {
                 ctx->state = LIN_SLAVE_WAIT_BREAK;
             }
+            lin_port_led_set(channel,LIN_LED_RX,false);
         }
     }
 
@@ -381,6 +571,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
         } else {
             u->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
             ctx->state = LIN_SLAVE_WAIT_BREAK;
+            lin_port_led_set(channel,LIN_LED_TX,false);
         }
     }
 

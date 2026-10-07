@@ -40,8 +40,16 @@ The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
 - OpenOCD/ST-Link initial programming
 - Linux `beiis-lind` daemon with `SOCK_SEQPACKET`
 - host CLI and Python client
+- persistent multi-instance application runtime (up to 8 instances, 32 data channels)
+- native runtime recovery: STM32 reset and direct mboot entry over I2C
+- field update through mboot while the MicroPython runtime is active
+- active-low master/slave/TX/RX LEDs for both LIN channels
+- bidirectional LIN1/LIN2 master/slave operation verified with classic and enhanced checksums
+- Unix SOCK_SEQPACKET daemon path verified end-to-end on hardware
+- runtime management, application data, LIN and mboot/recovery verified through beiis-lind
 - tested IRQ hardware path: STM32 PC6 -> isolated IRQ -> Raspberry Pi GPIO6
 - IRQ-driven daemon events are not integrated yet
+- beiis-lind currently exposes a local Unix socket only; no direct TCP listener
 
 ## Repository layout
 
@@ -87,7 +95,9 @@ Install the Linux daemon:
 sudo bash scripts/install-daemon.sh
 ```
 
-See `docs/human/` for build, flashing, host and LIN API details.
+See `docs/human/` for build, flashing, host and LIN API details. For remote
+testing over a LAN, see `docs/human/LAN_TEST.md`; the documented test uses SSH
+Unix-socket forwarding and does not expose the daemon directly on TCP.
 
 ## License and attribution
 
@@ -97,3 +107,13 @@ notices as described in `LICENSE`.
 
 Original project: **BE-IIS / Brechel Electronic - Industrial Interface Systems**  
 https://www.be-iis.eu/
+
+
+## MicroPython application runtime
+
+The STM32 can store and autostart up to eight MicroPython application
+instances. One instance slot is selected as the active owner of the normal
+Pi data interface; optional tap instances receive copies without consuming
+the owner's data. The existing Raw-REPL path remains available separately.
+
+See `protocol/APP-RUNTIME.md`.

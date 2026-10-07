@@ -3,6 +3,16 @@
 #define MICROPY_HW_BOARD_NAME       "BE-IIS LIN HAT"
 #define MICROPY_HW_MCU_NAME         "STM32G0B0KET6"
 
+// pllvalues.py extracts these from the preprocessed STM32 sources while
+// generating pllfreqtable.h. Define them at board-config level so they are
+// available before the HAL configuration header is pulled in.
+#ifndef HSE_VALUE
+#define HSE_VALUE                   (8000000)
+#endif
+#ifndef HSI_VALUE
+#define HSI_VALUE                   (16000000)
+#endif
+
 #define MICROPY_HW_HAS_SWITCH       (0)
 #define MICROPY_HW_HAS_FLASH        (1)
 #define MICROPY_HW_ENABLE_RNG       (0)
@@ -28,6 +38,11 @@
 #if !BUILDING_MBOOT
 #define MICROPY_BOARD_EARLY_INIT    BEIIS_LIN_HAT_board_early_init
 void BEIIS_LIN_HAT_board_early_init(void);
+
+// Frozen boot hook starts the app runtime only when at least one stored
+// instance has autostart enabled. Otherwise normal boot.py/Raw REPL behaviour
+// remains unchanged.
+#define MICROPY_BOARD_FROZEN_BOOT_FILE "beiis_boot.py"
 
 // Enter our own mboot image rather than the STM32 ROM bootloader.
 // 0x70ad0000 is mboot's entry key; the low 7 bits select I2C address 0x42.

@@ -120,3 +120,23 @@ class DaemonClient:
 
     def lin_slave_clear(self, channel: int):
         return self._call("lin_slave_clear", {"channel": channel})
+
+
+    def data_info(self):
+        return self._call("data_info")
+
+    def active_instance(self)->int:
+        return int(self._call("active_instance")["active_instance"])
+
+    def set_active_instance(self,instance:int)->int:
+        return int(self._call("set_active_instance",{"instance":int(instance)})["active_instance"])
+
+    def data_send(self,channel:int,data:bytes):
+        return self._call("data_send",{"channel":int(channel),"data":bytes(data).hex()})
+
+    def data_recv(self,instance:int|None=None,channel:int|None=None,timeout:float=2.0):
+        result=self._call("data_recv",{"instance":instance,"channel":channel,"timeout":float(timeout)})
+        return int(result["instance"]),int(result["channel"]),bytes.fromhex(result["data"])
+
+    def runtime_call(self,op:str,args:dict|None=None,timeout:float=2.0):
+        return self._call("runtime",{"op":str(op),"args":args or {},"timeout":float(timeout)})
