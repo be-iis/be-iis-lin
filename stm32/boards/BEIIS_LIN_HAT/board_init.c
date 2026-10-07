@@ -223,12 +223,17 @@ void I2C1_IRQHandler(void) {
         i2c_rx_byte((uint8_t)I2C1->RXDR);
     }
 
-    // A target-transmit read can present NACKF together with TXIS on the
-    // master's final byte.  NACK must win: servicing TXIS first would pop one
-    // extra byte from the software FIFO even though the master will never clock
-    // it.  That corrupts the following framed APP packet at I2C read boundaries.
+    // In target-transmit mode STM32 can assert NACKF together with TXIS
+    // after the master's final byte.  TXIS still has to be serviced, otherwise
+    // the peripheral can remain stuck for the next read.  But the requested
+    // byte is only speculative prefetch and must not consume the next byte from
+    // our software FIFO.  Load a disposable byte; the next read ADDR event
+    // flushes TXDR before sending real data.
     if (isr & I2C_ISR_NACKF) {
         I2C1->ICR = I2C_ICR_NACKCF;
+        if (isr & I2C_ISR_TXIS) {
+            I2C1->TXDR = 0;
+        }
     } else if (isr & I2C_ISR_TXIS) {
         I2C1->TXDR = i2c_tx_byte();
     }
