@@ -6,7 +6,7 @@ import sys
 
 import appio
 
-MAX_INSTANCES = 8
+MAX_INSTANCES = 16
 MAX_CHANNELS = 32
 MGMT_CHANNEL = 0xFF
 ROOT = "/flash/beiis"
@@ -211,7 +211,7 @@ class Runtime:
         spec["channels"] = clean
         slot = int(spec.get("slot", -1))
         if slot < 0 or slot >= MAX_INSTANCES:
-            raise ValueError("instance slot must be 0..7")
+            raise ValueError("instance slot must be 0..15")
         spec["slot"] = slot
         spec["tap"] = bool(spec.get("tap", False))
         spec["autostart"] = bool(spec.get("autostart", False))
@@ -228,7 +228,7 @@ class Runtime:
 
     def add_instance(self, name, app, channels=None, config=None, autostart=False, resources=None, tap=False):
         if len(self.config["instances"]) >= MAX_INSTANCES:
-            raise ValueError("maximum 8 instances")
+            raise ValueError("maximum 16 instances")
         if self._find_spec(name) is not None:
             raise ValueError("instance already exists")
         os.stat(_app_path(app))
