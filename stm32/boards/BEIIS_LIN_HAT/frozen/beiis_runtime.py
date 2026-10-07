@@ -556,12 +556,16 @@ class Runtime:
     async def _reply(self, request_id, ok, result=None, error=None):
         self._debug("reply-enter")
         message = {"id": request_id, "ok": ok}
+        self._debug("reply-dict")
         if ok:
             message["result"] = result
         else:
             message["error"] = error
-        data = json.dumps(message).encode()
-        self._debug("reply-json")
+        self._debug("reply-result")
+        text = json.dumps(message)
+        self._debug("reply-dumps")
+        data = text.encode()
+        self._debug("reply-encode")
         while not appio.try_send(0xff, MGMT_CHANNEL, data):
             self._debug("reply-wait")
             await asyncio.sleep_ms(1)
