@@ -52,8 +52,3 @@ application sources and `instances.json` from a HAT into this directory before
 changing them. This avoids silently replacing working field code with a guessed
 implementation.
 
-## IP separation
-
-There is no IP-over-LIN code in this directory, in the frozen MicroPython
-runtime, or in the native STM32 application transport. The IP experiment lives
-only in `examples/ip-over-lin/`.
