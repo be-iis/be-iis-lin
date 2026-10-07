@@ -581,20 +581,17 @@ class Runtime:
 
     async def run(self):
         self.running = True
-        dispatcher = asyncio.create_task(self._dispatcher())
         try:
             for spec in self.config["instances"]:
                 self._validate_spec(spec)
                 if spec.get("autostart"):
                     await self.start_instance(spec["name"])
-            while self.running:
-                await asyncio.sleep_ms(20)
+
+            # Keep the management/data dispatcher in the main runtime task.
+            # If it fails, propagate the exception instead of leaving a
+            # zombie runtime that still owns the MicroPython interpreter.
+            await self._dispatcher()
         finally:
-            dispatcher.cancel()
-            try:
-                await dispatcher
-            except asyncio.CancelledError:
-                pass
             for spec in self.config["instances"]:
                 await self.stop_instance(spec["name"])
 
