@@ -66,7 +66,7 @@ static MP_DEFINE_CONST_FUN_OBJ_0(mod_appio_active_instance_obj, mod_appio_active
 static mp_obj_t mod_appio_set_active_instance(mp_obj_t instance_obj) {
     int instance = mp_obj_get_int(instance_obj);
     if (instance < 0 || instance >= BEIIS_APP_MAX_INSTANCES) {
-        mp_raise_ValueError(MP_ERROR_TEXT("instance must be 0..7"));
+        mp_raise_ValueError(MP_ERROR_TEXT("instance must be 0..15"));
     }
     if (beiis_app_set_active_instance((uint8_t)instance) != 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid active instance"));
