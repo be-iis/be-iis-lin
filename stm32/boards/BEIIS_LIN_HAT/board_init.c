@@ -41,6 +41,59 @@ typedef struct {
 
 static lin_slave_ctx_t lin_slave[2];
 
+static bool lin_led_resolve(uint8_t channel,lin_led_t led,GPIO_TypeDef **port,uint16_t *pin) {
+    if(channel==1) {
+        switch(led) {
+            case LIN_LED_RX:     *port=GPIOA; *pin=GPIO_PIN_5;  return true;
+            case LIN_LED_TX:     *port=GPIOB; *pin=GPIO_PIN_1;  return true;
+            case LIN_LED_SLAVE:  *port=GPIOA; *pin=GPIO_PIN_10; return true;
+            case LIN_LED_MASTER: *port=GPIOA; *pin=GPIO_PIN_6;  return true;
+            default: return false;
+        }
+    }
+    if(channel==2) {
+        switch(led) {
+            case LIN_LED_RX:     *port=GPIOB; *pin=GPIO_PIN_3;  return true;
+            case LIN_LED_TX:     *port=GPIOB; *pin=GPIO_PIN_4;  return true;
+            case LIN_LED_SLAVE:  *port=GPIOB; *pin=GPIO_PIN_5;  return true;
+            case LIN_LED_MASTER: *port=GPIOA; *pin=GPIO_PIN_15; return true;
+            default: return false;
+        }
+    }
+    return false;
+}
+
+void lin_port_led_set(uint8_t channel,lin_led_t led,bool on) {
+    GPIO_TypeDef *port;
+    uint16_t pin;
+    if(!lin_led_resolve(channel,led,&port,&pin)) return;
+    // All board LEDs are active-low (_N).
+    HAL_GPIO_WritePin(port,pin,on?GPIO_PIN_RESET:GPIO_PIN_SET);
+}
+
+void lin_port_led_set_mask(uint8_t mask) {
+    for(uint8_t channel=1;channel<=2;channel++) {
+        for(uint8_t led=0;led<4;led++) {
+            uint8_t bit=(uint8_t)(((channel-1)*4)+led);
+            lin_port_led_set(channel,(lin_led_t)led,(mask&(1u<<bit))!=0);
+        }
+    }
+}
+
+uint8_t lin_port_led_get_mask(void) {
+    uint8_t mask=0;
+    for(uint8_t channel=1;channel<=2;channel++) {
+        for(uint8_t led=0;led<4;led++) {
+            GPIO_TypeDef *port;
+            uint16_t pin;
+            if(!lin_led_resolve(channel,(lin_led_t)led,&port,&pin)) continue;
+            uint8_t bit=(uint8_t)(((channel-1)*4)+led);
+            if((port->ODR&pin)==0) mask|=(uint8_t)(1u<<bit);
+        }
+    }
+    return mask;
+}
+
 static volatile uint8_t i2c_reg;
 static volatile uint8_t i2c_expect_reg = 1;
 static volatile uint8_t i2c_payload_index;
@@ -68,6 +121,18 @@ static void beiis_gpio_init(void) {
     g.Pin = GPIO_PIN_2 | GPIO_PIN_3;
     g.Alternate = GPIO_AF1_USART2;
     HAL_GPIO_Init(GPIOA, &g);
+
+    // Active-low LIN status/activity LEDs. Initialise all LEDs off.
+    g.Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &g);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15, GPIO_PIN_SET);
+
+    g.Pin = GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    HAL_GPIO_Init(GPIOB, &g);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5, GPIO_PIN_SET);
 
     // TJA1021 /SLP pins. High = normal mode, low = sleep.
     g.Pin = GPIO_PIN_4 | GPIO_PIN_8;
@@ -413,6 +478,8 @@ int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len
     ctx->tx_pos = 0;
     ctx->state = LIN_SLAVE_WAIT_BREAK;
     ctx->enabled = true;
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    lin_port_led_set(channel,LIN_LED_TX,false);
 
     USART_TypeDef *u = h->Instance;
     u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
@@ -436,6 +503,8 @@ int lin_port_slave_clear(uint8_t channel) {
     ctx->state = LIN_SLAVE_WAIT_BREAK;
     ctx->tx_len = 0;
     ctx->tx_pos = 0;
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    lin_port_led_set(channel,LIN_LED_TX,false);
 
     h->Instance->CR2 &= ~USART_CR2_LBDIE;
     h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE);
@@ -462,6 +531,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
 
     if (isr & USART_ISR_LBDF) {
         u->ICR = USART_ICR_LBDCF;
+        lin_port_led_set(channel,LIN_LED_RX,true);
         ctx->state = LIN_SLAVE_WAIT_SYNC;
         ctx->tx_pos = 0;
         ctx->tx_len = 0;
@@ -472,6 +542,9 @@ void beiis_lin_uart_irq(uint8_t channel) {
 
         if (ctx->state == LIN_SLAVE_WAIT_SYNC) {
             ctx->state = (v == 0x55) ? LIN_SLAVE_WAIT_PID : LIN_SLAVE_WAIT_BREAK;
+            if(ctx->state==LIN_SLAVE_WAIT_BREAK) {
+                lin_port_led_set(channel,LIN_LED_RX,false);
+            }
         } else if (ctx->state == LIN_SLAVE_WAIT_PID) {
             if (lin_pid_valid(v) && ((v & 0x3f) == ctx->id)) {
                 memcpy(ctx->tx, ctx->data, ctx->len);
@@ -479,6 +552,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
                 ctx->tx_len = ctx->len + 1;
                 ctx->tx_pos = 0;
                 ctx->state = LIN_SLAVE_TX;
+                lin_port_led_set(channel,LIN_LED_TX,true);
 
                 // Arm TXE interrupt only. Do not write TDR here because
                 // 'isr' is a snapshot from before the PID was processed; using
@@ -487,6 +561,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
             } else {
                 ctx->state = LIN_SLAVE_WAIT_BREAK;
             }
+            lin_port_led_set(channel,LIN_LED_RX,false);
         }
     }
 
@@ -496,6 +571,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
         } else {
             u->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
             ctx->state = LIN_SLAVE_WAIT_BREAK;
+            lin_port_led_set(channel,LIN_LED_TX,false);
         }
     }
 
