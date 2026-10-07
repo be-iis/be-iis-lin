@@ -5,6 +5,16 @@ static bool valid_channel(uint8_t channel) {
     return channel == 1 || channel == 2;
 }
 
+static void set_master_mode(uint8_t channel) {
+    lin_port_led_set(channel,LIN_LED_SLAVE,false);
+    lin_port_led_set(channel,LIN_LED_MASTER,true);
+}
+
+static void set_slave_mode(uint8_t channel) {
+    lin_port_led_set(channel,LIN_LED_MASTER,false);
+    lin_port_led_set(channel,LIN_LED_SLAVE,true);
+}
+
 uint8_t lin_make_pid(uint8_t id) {
     id&=0x3f;
     uint8_t i0=(id>>0)&1,i1=(id>>1)&1,i2=(id>>2)&1,i3=(id>>3)&1,i4=(id>>4)&1,i5=(id>>5)&1;
@@ -40,20 +50,31 @@ static lin_result_t send_header(uint8_t channel,uint8_t id,uint32_t timeout_ms) 
 
 lin_result_t lin_master_send(uint8_t channel,const lin_frame_t *f,lin_checksum_mode_t mode,uint32_t timeout_ms) {
     if(!valid_channel(channel)||!f||f->id>0x3f||f->len>8) return LIN_ERR_ARG;
+    set_master_mode(channel);
+    lin_port_led_set(channel,LIN_LED_TX,true);
     lin_result_t r=send_header(channel,f->id,timeout_ms);
-    if(r!=LIN_OK) return r;
-    uint8_t b[9];
-    memcpy(b,f->data,f->len);
-    b[f->len]=lin_checksum(lin_make_pid(f->id),f->data,f->len,mode);
-    return lin_port_tx(channel,b,f->len+1,timeout_ms)==0?LIN_OK:LIN_ERR_IO;
+    if(r==LIN_OK) {
+        uint8_t b[9];
+        memcpy(b,f->data,f->len);
+        b[f->len]=lin_checksum(lin_make_pid(f->id),f->data,f->len,mode);
+        r=lin_port_tx(channel,b,f->len+1,timeout_ms)==0?LIN_OK:LIN_ERR_IO;
+    }
+    lin_port_led_set(channel,LIN_LED_TX,false);
+    return r;
 }
 
 lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_checksum_mode_t mode,lin_frame_t *out,uint32_t timeout_ms) {
     if(!valid_channel(channel)||!out||id>0x3f||len>8) return LIN_ERR_ARG;
+    set_master_mode(channel);
+    lin_port_led_set(channel,LIN_LED_TX,true);
     lin_result_t r=send_header(channel,id,timeout_ms);
+    lin_port_led_set(channel,LIN_LED_TX,false);
     if(r!=LIN_OK) return r;
     uint8_t b[9];
-    if(lin_port_rx(channel,b,len+1,timeout_ms)!=0) return LIN_ERR_TIMEOUT;
+    lin_port_led_set(channel,LIN_LED_RX,true);
+    int rx=lin_port_rx(channel,b,len+1,timeout_ms);
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    if(rx!=0) return LIN_ERR_TIMEOUT;
     if(b[len]!=lin_checksum(lin_make_pid(id),b,len,mode)) return LIN_ERR_CHECKSUM;
     out->id=id; out->len=len; memcpy(out->data,b,len);
     return LIN_OK;
@@ -61,18 +82,36 @@ lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_check
 
 lin_result_t lin_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode) {
     if(!valid_channel(channel)||id>0x3f||!data||len>8) return LIN_ERR_ARG;
-    return lin_port_slave_set(channel,id,data,len,mode)==0?LIN_OK:LIN_ERR_IO;
+    int r=lin_port_slave_set(channel,id,data,len,mode);
+    if(r==0) set_slave_mode(channel);
+    return r==0?LIN_OK:LIN_ERR_IO;
 }
 
 lin_result_t lin_slave_clear(uint8_t channel) {
     if(!valid_channel(channel)) return LIN_ERR_ARG;
-    return lin_port_slave_clear(channel)==0?LIN_OK:LIN_ERR_IO;
+    int r=lin_port_slave_clear(channel);
+    if(r==0) lin_port_led_set(channel,LIN_LED_SLAVE,false);
+    return r==0?LIN_OK:LIN_ERR_IO;
 }
 
 
 lin_result_t lin_master_request_raw(uint8_t channel,uint8_t id,uint8_t *buf,size_t len,uint32_t timeout_ms) {
     if(!valid_channel(channel)||!buf||id>0x3f||len==0||len>9) return LIN_ERR_ARG;
+    set_master_mode(channel);
+    lin_port_led_set(channel,LIN_LED_TX,true);
     lin_result_t r=send_header(channel,id,timeout_ms);
+    lin_port_led_set(channel,LIN_LED_TX,false);
     if(r!=LIN_OK) return r;
-    return lin_port_rx(channel,buf,len,timeout_ms)==0?LIN_OK:LIN_ERR_TIMEOUT;
+    lin_port_led_set(channel,LIN_LED_RX,true);
+    int rx=lin_port_rx(channel,buf,len,timeout_ms);
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    return rx==0?LIN_OK:LIN_ERR_TIMEOUT;
+}
+
+void lin_led_set_mask(uint8_t mask) {
+    lin_port_led_set_mask(mask);
+}
+
+uint8_t lin_led_get_mask(void) {
+    return lin_port_led_get_mask();
 }
