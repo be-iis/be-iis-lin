@@ -9,6 +9,7 @@ import appio
 MAX_INSTANCES = 8
 MAX_CHANNELS = 32
 MGMT_CHANNEL = 0xFF
+DEBUG_CHANNEL = 31
 ROOT = "/flash/beiis"
 APP_DIR = ROOT + "/apps"
 CONFIG_PATH = ROOT + "/instances.json"
@@ -547,24 +548,37 @@ class Runtime:
             return True
         raise ValueError("unknown runtime operation")
 
+    def _debug(self, marker):
+        # Temporary bring-up trace on a normal application frame so management
+        # reply framing is not part of the diagnostic path.
+        appio.try_send(7, DEBUG_CHANNEL, marker.encode())
+
     async def _reply(self, request_id, ok, result=None, error=None):
+        self._debug("reply-enter")
         message = {"id": request_id, "ok": ok}
         if ok:
             message["result"] = result
         else:
             message["error"] = error
         data = json.dumps(message).encode()
+        self._debug("reply-json")
         while not appio.try_send(0xff, MGMT_CHANNEL, data):
+            self._debug("reply-wait")
             await asyncio.sleep_ms(1)
+        self._debug("reply-sent")
 
     async def _handle_management(self, payload):
         request_id = 0
+        self._debug("mgmt-enter")
         try:
             request = json.loads(payload.decode())
             request_id = int(request.get("id", 0))
+            self._debug("mgmt-json")
             result = await self._control(request)
+            self._debug("mgmt-control")
             await self._reply(request_id, True, result=result)
         except Exception as exc:
+            self._debug("mgmt-except")
             await self._reply(request_id, False, error=repr(exc))
 
     async def _dispatcher(self):
