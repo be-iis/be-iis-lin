@@ -74,6 +74,16 @@ static mp_obj_t mod_lin_slave_clear(mp_obj_t channel_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_slave_clear_obj,mod_lin_slave_clear);
 
+static mp_obj_t mod_lin_leds(size_t n,const mp_obj_t *a) {
+    if(n) {
+        int mask=mp_obj_get_int(a[0]);
+        if(mask<0 || mask>255) mp_raise_ValueError(MP_ERROR_TEXT("LED mask must be 0..255"));
+        lin_led_set_mask((uint8_t)mask);
+    }
+    return mp_obj_new_int(lin_led_get_mask());
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lin_leds_obj,0,1,mod_lin_leds);
+
 static const mp_rom_map_elem_t globals_table[]={
     {MP_ROM_QSTR(MP_QSTR___name__),MP_ROM_QSTR(MP_QSTR_lin)},
     {MP_ROM_QSTR(MP_QSTR_init),MP_ROM_PTR(&mod_lin_init_obj)},
@@ -82,6 +92,7 @@ static const mp_rom_map_elem_t globals_table[]={
     {MP_ROM_QSTR(MP_QSTR_request_raw),MP_ROM_PTR(&mod_lin_request_raw_obj)},
     {MP_ROM_QSTR(MP_QSTR_slave_set),MP_ROM_PTR(&mod_lin_slave_set_obj)},
     {MP_ROM_QSTR(MP_QSTR_slave_clear),MP_ROM_PTR(&mod_lin_slave_clear_obj)},
+    {MP_ROM_QSTR(MP_QSTR_leds),MP_ROM_PTR(&mod_lin_leds_obj)},
 };
 static MP_DEFINE_CONST_DICT(globals,globals_table);
 const mp_obj_module_t lin_module={.base={&mp_type_module},.globals=(mp_obj_dict_t*)&globals};
