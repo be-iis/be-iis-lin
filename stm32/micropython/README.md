@@ -41,3 +41,19 @@ For the final PCB:
 ```sh
 make micropython-build BOARD=BEIIS_LIN_HAT BOARD_DIR=/path/to/BEIIS_LIN_HAT
 ```
+
+
+## Source layout
+
+MicroPython-related source is kept under `stm32/micropython/`:
+
+- `apps/` - persistent runtime applications and the canonical runtime role layout
+- `scripts/` - standalone bring-up/test scripts executed directly in MicroPython
+- `modules/` - native C modules exposed to MicroPython
+
+The frozen runtime/boot integration remains in
+`stm32/boards/BEIIS_LIN_HAT/frozen/`.
+
+Deployed runtime application files are stored on the STM32 filesystem under
+`/flash/beiis/apps/`; use `scripts/export-micropython-runtime.py` to capture
+the exact deployed sources into the repository before modifying them.
