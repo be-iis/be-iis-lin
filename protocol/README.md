@@ -21,8 +21,10 @@ write, followed by a read transaction.
 
 ## mboot over I2C
 
-The same I2C address is used by mboot after `machine.bootloader()`. The host
-implementation is in `host/beiis_lin/mboot.py`.
+The same I2C address is used by mboot. Application protocol v3 can enter mboot
+through a native application-control operation, so field updates do not depend
+on `machine.bootloader()` or Raw REPL availability. The host implementation is
+in `host/beiis_lin/mboot.py`.
 
 The updater:
 1. identifies the board,
@@ -39,8 +41,9 @@ The one-shot first-vector flow is required by STM32G0 flash/ECC behaviour.
 
 ## Parallel application data transport
 
-The Raw-REPL byte pipe remains unchanged. A second framed transport provides
-long-running MicroPython application instances, 32 user channels, stored apps,
-autostart, active-instance selection and optional tap instances.
+The Raw-REPL byte pipe remains unchanged. A second framed transport (currently
+protocol v3) provides long-running MicroPython application instances, 32 user
+channels, stored apps, autostart, active-instance selection, optional tap
+instances, and native reset/mboot recovery controls.
 
 See [APP-RUNTIME.md](APP-RUNTIME.md).
