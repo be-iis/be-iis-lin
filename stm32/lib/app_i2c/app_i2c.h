@@ -27,6 +27,8 @@ enum {
 void beiis_app_i2c_init(void);
 size_t beiis_app_host_write(const uint8_t *src, size_t len);
 size_t beiis_app_host_read(uint8_t *dst, size_t len);
+int beiis_app_host_peek(size_t offset, uint8_t *value);
+size_t beiis_app_host_consume(size_t len);
 uint8_t beiis_app_reg_read_u8(uint8_t reg);
 void beiis_app_control(uint8_t value);
 uint8_t beiis_app_active_instance(void);
