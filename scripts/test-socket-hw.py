@@ -113,7 +113,8 @@ def main() -> int:
         print("      LIN2 master -> LIN1 slave OK")
 
         print("[5/5] native mboot path through socket + runtime restore")
-        c.bootloader()
+        # mboot_info() itself enters mboot from the application and therefore
+        # exercises the native protocol-v3 recovery path through the daemon.
         mboot = c.mboot_info()
         print("      mboot:", mboot)
         if mboot.get("board") != "BE-IIS LIN HAT":
