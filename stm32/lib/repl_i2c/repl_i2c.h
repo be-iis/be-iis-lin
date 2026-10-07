@@ -18,6 +18,8 @@ enum {
 void beiis_repl_i2c_init(void);
 size_t beiis_repl_host_write(const uint8_t *src,size_t len);
 size_t beiis_repl_host_read(uint8_t *dst,size_t len);
+int beiis_repl_host_peek(size_t offset,uint8_t *value);
+size_t beiis_repl_host_consume(size_t len);
 int beiis_repl_stdin_get(void);
 size_t beiis_repl_stdout_write(const uint8_t *src,size_t len);
 uint8_t beiis_repl_reg_read_u8(uint8_t reg);
