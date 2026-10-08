@@ -1,7 +1,7 @@
 BEIIS_API = 1
 
-# Generic binary LIN RPC. It deliberately has no knowledge of the host
-# application protocol carried above it (IP, Modbus, machine control, ...).
+# Generic binary LIN RPC. It deliberately has no knowledge of the
+# application protocol carried above it.
 #
 # request:
 #   byte 0      operation
