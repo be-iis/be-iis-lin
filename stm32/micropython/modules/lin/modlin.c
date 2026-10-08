@@ -74,6 +74,30 @@ static mp_obj_t mod_lin_slave_clear(mp_obj_t channel_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_slave_clear_obj,mod_lin_slave_clear);
 
+
+static mp_obj_t mod_lin_slave_rx_set(size_t n,const mp_obj_t *a) {
+    uint8_t channel=(uint8_t)mp_obj_get_int(a[0]);
+    uint8_t id=(uint8_t)mp_obj_get_int(a[1]);
+    uint8_t len=(uint8_t)mp_obj_get_int(a[2]);
+    if(len>8) mp_raise_ValueError(MP_ERROR_TEXT("LIN data > 8 bytes"));
+    lin_checksum_mode_t m=(n>3&&!mp_obj_is_true(a[3]))?LIN_CHECKSUM_CLASSIC:LIN_CHECKSUM_ENHANCED;
+    int r=lin_slave_rx_set(channel,id,len,m);
+    if(r!=LIN_OK) mp_raise_OSError(-r);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lin_slave_rx_set_obj,3,4,mod_lin_slave_rx_set);
+
+static mp_obj_t mod_lin_slave_rx_recv(mp_obj_t channel_obj) {
+    uint8_t channel=(uint8_t)mp_obj_get_int(channel_obj);
+    uint8_t data[8];
+    size_t len=0;
+    int r=lin_slave_rx_recv(channel,data,sizeof(data),&len);
+    if(r==LIN_ERR_TIMEOUT) return mp_const_none;
+    if(r!=LIN_OK) mp_raise_OSError(-r);
+    return mp_obj_new_bytes(data,len);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_slave_rx_recv_obj,mod_lin_slave_rx_recv);
+
 static mp_obj_t mod_lin_leds(size_t n,const mp_obj_t *a) {
     if(n) {
         int mask=mp_obj_get_int(a[0]);
@@ -92,6 +116,8 @@ static const mp_rom_map_elem_t globals_table[]={
     {MP_ROM_QSTR(MP_QSTR_request_raw),MP_ROM_PTR(&mod_lin_request_raw_obj)},
     {MP_ROM_QSTR(MP_QSTR_slave_set),MP_ROM_PTR(&mod_lin_slave_set_obj)},
     {MP_ROM_QSTR(MP_QSTR_slave_clear),MP_ROM_PTR(&mod_lin_slave_clear_obj)},
+    {MP_ROM_QSTR(MP_QSTR_slave_rx_set),MP_ROM_PTR(&mod_lin_slave_rx_set_obj)},
+    {MP_ROM_QSTR(MP_QSTR_slave_rx_recv),MP_ROM_PTR(&mod_lin_slave_rx_recv_obj)},
     {MP_ROM_QSTR(MP_QSTR_leds),MP_ROM_PTR(&mod_lin_leds_obj)},
 };
 static MP_DEFINE_CONST_DICT(globals,globals_table);
