@@ -320,24 +320,20 @@ class IpOverLinBridge:
         socket_path: str,
         ifname: str,
         address: str,
-        channel: int,
         baud: int,
         nodes: list[int],
         poll_ms: int,
         mtu: int,
         wire_loopback: bool,
-        loopback_slave_channel: int,
     ):
         self.socket_path = socket_path
         self.ifname = ifname
         self.address = address
-        self.channel = channel
         self.baud = baud
         self.nodes = nodes
         self.poll_ms = poll_ms
         self.mtu = mtu
         self.wire_loopback = wire_loopback
-        self.loopback_slave_channel = loopback_slave_channel
 
         interface = ipaddress.IPv4Interface(address)
         if int(interface.ip) & 0xFF != 1:
@@ -487,7 +483,7 @@ class IpOverLinBridge:
         timeout = max(self.poll_ms, 1) / 1000.0
 
         print(
-            f"{self.tun.name}: {self.address}, LIN{self.channel}, "
+            f"{self.tun.name}: {self.address}, runtime master, "
             f"nodes={','.join(str(node) for node in self.nodes)}"
         )
 
@@ -533,7 +529,6 @@ def main() -> int:
     parser.add_argument("--socket", default=DEFAULT_SOCKET_PATH)
     parser.add_argument("--ifname", default="lin0")
     parser.add_argument("--address", default="10.42.1.1/24")
-    parser.add_argument("--channel", type=int, choices=(1, 2), default=1)
     parser.add_argument("--baud", type=int, default=19200)
     parser.add_argument("--nodes", type=parse_nodes, default=parse_nodes("2"))
     parser.add_argument("--poll-ms", type=int, default=20)
@@ -543,31 +538,20 @@ def main() -> int:
         action="store_true",
         help="use the other HAT LIN channel as a physical node-2 ICMP test peer",
     )
-    parser.add_argument(
-        "--loopback-slave-channel",
-        type=int,
-        choices=(1, 2),
-        default=2,
-    )
     args = parser.parse_args()
 
     if os.geteuid() != 0:
         parser.error("beiis-lin-ip must run as root to create/configure the TUN device")
 
-    if args.wire_loopback and args.loopback_slave_channel == args.channel:
-        parser.error("wire-loopback slave channel must differ from master channel")
-
     bridge = IpOverLinBridge(
         socket_path=args.socket,
         ifname=args.ifname,
         address=args.address,
-        channel=args.channel,
         baud=args.baud,
         nodes=args.nodes,
         poll_ms=args.poll_ms,
         mtu=args.mtu,
         wire_loopback=args.wire_loopback,
-        loopback_slave_channel=args.loopback_slave_channel,
     )
 
     try:
