@@ -8,7 +8,6 @@ import selectors
 import struct
 import subprocess
 import time
-from collections import deque
 
 from beiis_lin.client import DaemonClient, DaemonError
 from beiis_lin.socket_protocol import DEFAULT_SOCKET_PATH
@@ -19,6 +18,11 @@ IFF_TUN = 0x0001
 IFF_NO_PI = 0x1000
 
 FRAME_SIZE = 8
+HEADER_SIZE = 2
+PAYLOAD_SIZE = FRAME_SIZE - HEADER_SIZE
+SEQ_MASK = 0x3F
+FLAG_END = 0x40
+FLAG_START = 0x80
 
 RPC_PING = 0x00
 RPC_INIT = 0x01
@@ -26,6 +30,8 @@ RPC_SEND = 0x02
 RPC_REQUEST = 0x03
 RPC_SLAVE_SET = 0x04
 RPC_SLAVE_CLEAR = 0x05
+RPC_SLAVE_RX_SET = 0x08
+RPC_SLAVE_RX_RECV = 0x09
 
 MASTER_TX_SLOT = 0
 MASTER_RX_SLOT = 1
@@ -33,11 +39,16 @@ SLAVE_TX_SLOT = 3
 SLAVE_RX_SLOT = 4
 APP_CHANNEL = 0
 
-HEADER_SIZE = 2
-PAYLOAD_SIZE = FRAME_SIZE - HEADER_SIZE
-SEQ_MASK = 0x3F
-FLAG_END = 0x40
-FLAG_START = 0x80
+
+def downlink_id(node: int) -> int:
+    node = int(node)
+    if node < 2 or node > 31:
+        raise ValueError("node must be 2..31")
+    return node
+
+
+def uplink_id(node: int) -> int:
+    return downlink_id(node) | 0x20
 
 
 def fragment_packet(packet: bytes, sequence: int) -> list[bytes]:
@@ -131,71 +142,6 @@ class Reassembler:
         return packet
 
 
-def internet_checksum(data: bytes) -> int:
-    total = 0
-    length = len(data)
-    index = 0
-
-    while index + 1 < length:
-        total += (data[index] << 8) | data[index + 1]
-        total = (total & 0xFFFF) + (total >> 16)
-        index += 2
-
-    if index < length:
-        total += data[index] << 8
-        total = (total & 0xFFFF) + (total >> 16)
-
-    while total >> 16:
-        total = (total & 0xFFFF) + (total >> 16)
-
-    return (~total) & 0xFFFF
-
-
-def icmp_echo_reply(packet: bytes, node: int) -> bytes | None:
-    if len(packet) < 28 or (packet[0] >> 4) != 4:
-        return None
-
-    ihl = (packet[0] & 0x0F) * 4
-    if ihl < 20 or len(packet) < ihl + 8:
-        return None
-
-    total_length = (packet[2] << 8) | packet[3]
-    if total_length < ihl + 8 or total_length > len(packet):
-        return None
-
-    if packet[9] != 1:
-        return None
-
-    if packet[19] != node:
-        return None
-
-    if packet[ihl] != 8 or packet[ihl + 1] != 0:
-        return None
-
-    reply = bytearray(packet[:total_length])
-
-    source = bytes(reply[12:16])
-    destination = bytes(reply[16:20])
-    reply[12:16] = destination
-    reply[16:20] = source
-    reply[8] = 64
-
-    reply[ihl] = 0
-    reply[ihl + 2] = 0
-    reply[ihl + 3] = 0
-    checksum = internet_checksum(reply[ihl:total_length])
-    reply[ihl + 2] = (checksum >> 8) & 0xFF
-    reply[ihl + 3] = checksum & 0xFF
-
-    reply[10] = 0
-    reply[11] = 0
-    checksum = internet_checksum(reply[:ihl])
-    reply[10] = (checksum >> 8) & 0xFF
-    reply[11] = checksum & 0xFF
-
-    return bytes(reply)
-
-
 class RuntimeLinClient:
     def __init__(self, client, tx_slot, rx_slot, app_channel=APP_CHANNEL):
         self.client = client
@@ -234,8 +180,7 @@ class RuntimeLinClient:
         self.call(bytes((RPC_PING,)))
 
     def init(self, baud: int) -> None:
-        baud = int(baud)
-        self.call(bytes((RPC_INIT,)) + baud.to_bytes(4, "little"))
+        self.call(bytes((RPC_INIT,)) + int(baud).to_bytes(4, "little"))
 
     def send(self, frame_id: int, data: bytes, enhanced: bool = True) -> None:
         data = bytes(data)
@@ -278,6 +223,28 @@ class RuntimeLinClient:
     def slave_clear(self) -> None:
         self.call(bytes((RPC_SLAVE_CLEAR,)))
 
+    def slave_rx_set(
+        self, frame_id: int, length: int, enhanced: bool = True
+    ) -> None:
+        if length < 0 or length > 8:
+            raise ValueError("LIN receive length must be 0..8")
+        flags = 1 if enhanced else 0
+        self.call(
+            bytes((RPC_SLAVE_RX_SET, frame_id & 0x3F, flags, length))
+        )
+
+    def slave_rx_recv(self) -> bytes | None:
+        result = self.call(bytes((RPC_SLAVE_RX_RECV,)))
+        if result == b"\x00":
+            return None
+        if len(result) < 2 or result[0] != 1:
+            raise RuntimeError("invalid slave receive result")
+        length = result[1]
+        data = result[2:]
+        if len(data) != length:
+            raise RuntimeError("invalid slave receive data length")
+        return data
+
 
 class TunInterface:
     def __init__(self, name: str, address: str, mtu: int):
@@ -286,16 +253,21 @@ class TunInterface:
         self.mtu = mtu
         self.fd = -1
 
-    def open(self) -> int:
+    def _create(self) -> int:
         self.fd = os.open("/dev/net/tun", os.O_RDWR | os.O_NONBLOCK)
         ifreq = struct.pack("16sH", self.name.encode(), IFF_TUN | IFF_NO_PI)
         result = fcntl.ioctl(self.fd, TUNSETIFF, ifreq)
-        actual_name = result[:16].split(b"\0", 1)[0].decode()
-        self.name = actual_name
+        self.name = result[:16].split(b"\0", 1)[0].decode()
+        return self.fd
 
+    def open(self) -> int:
+        self._create()
         subprocess.run(["ip", "addr", "flush", "dev", self.name], check=True)
         subprocess.run(["ip", "addr", "add", self.address, "dev", self.name], check=True)
-        subprocess.run(["ip", "link", "set", "dev", self.name, "mtu", str(self.mtu)], check=True)
+        subprocess.run(
+            ["ip", "link", "set", "dev", self.name, "mtu", str(self.mtu)],
+            check=True,
+        )
         subprocess.run(["ip", "link", "set", "dev", self.name, "up"], check=True)
         return self.fd
 
@@ -313,6 +285,64 @@ class TunInterface:
                 self.fd = -1
 
 
+class NamespaceTunInterface(TunInterface):
+    def __init__(
+        self,
+        name: str,
+        address: str,
+        mtu: int,
+        namespace: str,
+    ):
+        super().__init__(name, address, mtu)
+        self.namespace = namespace
+
+    def open(self) -> int:
+        subprocess.run(
+            ["ip", "netns", "del", self.namespace],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(["ip", "netns", "add", self.namespace], check=True)
+
+        self._create()
+        subprocess.run(
+            ["ip", "link", "set", "dev", self.name, "netns", self.namespace],
+            check=True,
+        )
+        subprocess.run(
+            ["ip", "-n", self.namespace, "link", "set", "lo", "up"],
+            check=True,
+        )
+        subprocess.run(
+            ["ip", "-n", self.namespace, "addr", "add", self.address, "dev", self.name],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "ip", "-n", self.namespace, "link", "set", "dev", self.name,
+                "mtu", str(self.mtu),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["ip", "-n", self.namespace, "link", "set", "dev", self.name, "up"],
+            check=True,
+        )
+        return self.fd
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+        subprocess.run(
+            ["ip", "netns", "del", self.namespace],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 class IpOverLinBridge:
     def __init__(
         self,
@@ -325,9 +355,10 @@ class IpOverLinBridge:
         poll_ms: int,
         mtu: int,
         wire_loopback: bool,
+        node_namespace: str,
+        node_ifname: str,
+        node_address: str,
     ):
-        self.socket_path = socket_path
-        self.ifname = ifname
         self.address = address
         self.baud = baud
         self.nodes = nodes
@@ -340,6 +371,9 @@ class IpOverLinBridge:
             raise ValueError("master IPv4 address must end in .1")
         self.network = interface.network
 
+        if wire_loopback and len(nodes) != 1:
+            raise ValueError("wire-loopback currently supports exactly one node")
+
         self.client = DaemonClient(socket_path)
         self.master = RuntimeLinClient(
             self.client, MASTER_TX_SLOT, MASTER_RX_SLOT, APP_CHANNEL
@@ -347,17 +381,36 @@ class IpOverLinBridge:
         self.slave = RuntimeLinClient(
             self.client, SLAVE_TX_SLOT, SLAVE_RX_SLOT, APP_CHANNEL
         )
-        self.tun = TunInterface(ifname, address, mtu)
+
+        self.master_tun = TunInterface(ifname, address, mtu)
+        self.node_tun = None
+        if wire_loopback:
+            node_iface = ipaddress.IPv4Interface(node_address)
+            expected_node = nodes[0]
+            if node_iface.network != interface.network:
+                raise ValueError("node endpoint must be in the same IPv4 subnet")
+            if (int(node_iface.ip) & 0xFF) != expected_node:
+                raise ValueError("node endpoint host octet must equal the LIN node")
+            self.node_tun = NamespaceTunInterface(
+                node_ifname,
+                node_address,
+                mtu,
+                node_namespace,
+            )
+
         self.selector = selectors.DefaultSelector()
         self.sequence = 1
-        self.reassemblers = {node: Reassembler() for node in nodes}
-        self.loopback_reply_frames: dict[int, deque[bytes]] = {
-            node: deque() for node in nodes
-        }
+        self.master_reassemblers = {node: Reassembler() for node in nodes}
+        self.slave_reassemblers = {node: Reassembler() for node in nodes}
 
     def close(self) -> None:
-        self.tun.close()
-        self.client.close()
+        try:
+            self.selector.close()
+        finally:
+            if self.node_tun is not None:
+                self.node_tun.close()
+            self.master_tun.close()
+            self.client.close()
 
     def prepare_backend(self) -> None:
         info = self.client.runtime_call("info", timeout=2.0)
@@ -398,6 +451,12 @@ class IpOverLinBridge:
                 raise RuntimeError("slave_native is not running")
             self.slave.ping()
             self.slave.init(self.baud)
+            node = self.nodes[0]
+            self.slave.slave_rx_set(
+                downlink_id(node),
+                FRAME_SIZE,
+                enhanced=True,
+            )
 
     def next_sequence(self) -> int:
         value = self.sequence
@@ -415,11 +474,20 @@ class IpOverLinBridge:
             return None
 
         node = int(destination) & 0xFF
-        if node <= 1 or node > 63:
+        if node not in self.nodes:
             return None
         return node
 
-    def transmit_packet(self, packet: bytes) -> None:
+    def wait_slave_rx(self, timeout: float = 1.0) -> bytes:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            data = self.slave.slave_rx_recv()
+            if data is not None:
+                return data
+            time.sleep(0.001)
+        raise TimeoutError("timeout waiting for slave receive frame")
+
+    def master_to_node(self, packet: bytes) -> None:
         if len(packet) > self.mtu:
             return
 
@@ -428,76 +496,104 @@ class IpOverLinBridge:
             return
 
         sequence = self.next_sequence()
-        for frame in fragment_packet(packet, sequence):
-            self.master.send(node, frame, enhanced=True)
 
-        if self.wire_loopback:
-            reply = icmp_echo_reply(packet, node)
-            if reply is not None:
-                queue = self.loopback_reply_frames[node]
-                queue.clear()
-                queue.extend(fragment_packet(reply, sequence))
-                self.drain_wire_loopback(node)
-
-    def drain_wire_loopback(self, node: int) -> None:
-        queue = self.loopback_reply_frames[node]
-        reassembler = self.reassemblers[node]
-
-        while queue:
-            frame = queue.popleft()
-            self.slave.slave_set(node, frame, enhanced=True)
-            received = self.master.request(
-                node,
-                FRAME_SIZE,
-                enhanced=True,
-            )
-            packet = reassembler.feed(received)
-            if packet is not None:
-                os.write(self.tun.fd, packet)
-
-        self.slave.slave_clear()
-
-    def poll_node(self, node: int) -> None:
-        if self.wire_loopback:
+        if not self.wire_loopback:
+            for frame in fragment_packet(packet, sequence):
+                self.master.send(downlink_id(node), frame, enhanced=True)
             return
 
+        reassembler = self.slave_reassemblers[node]
+        complete = None
+        for frame in fragment_packet(packet, sequence):
+            self.master.send(downlink_id(node), frame, enhanced=True)
+            received = self.wait_slave_rx()
+            complete = reassembler.feed(received)
+
+        if complete is not None and self.node_tun is not None:
+            os.write(self.node_tun.fd, complete)
+
+    def node_to_master(self, node: int, packet: bytes) -> None:
+        if len(packet) > self.mtu:
+            return
+
+        sequence = self.next_sequence()
+        reassembler = self.master_reassemblers[node]
+        complete = None
+        response_id = uplink_id(node)
+
+        try:
+            for frame in fragment_packet(packet, sequence):
+                self.slave.slave_set(response_id, frame, enhanced=True)
+                received = self.master.request(
+                    response_id,
+                    FRAME_SIZE,
+                    enhanced=True,
+                    timeout=2.0,
+                )
+                complete = reassembler.feed(received)
+        finally:
+            self.slave.slave_clear()
+
+        if complete is not None:
+            os.write(self.master_tun.fd, complete)
+
+    def poll_node(self, node: int) -> None:
         try:
             frame = self.master.request(
-                node,
+                uplink_id(node),
                 FRAME_SIZE,
                 enhanced=True,
+                timeout=0.2,
             )
         except (DaemonError, OSError, TimeoutError, RuntimeError, ValueError):
             return
 
-        packet = self.reassemblers[node].feed(frame)
+        packet = self.master_reassemblers[node].feed(frame)
         if packet is not None:
-            os.write(self.tun.fd, packet)
+            os.write(self.master_tun.fd, packet)
 
     def run(self) -> None:
         self.prepare_backend()
-        fd = self.tun.open()
-        self.selector.register(fd, selectors.EVENT_READ)
 
-        node_index = 0
+        master_fd = self.master_tun.open()
+        self.selector.register(master_fd, selectors.EVENT_READ, ("master", None))
+
+        if self.node_tun is not None:
+            node_fd = self.node_tun.open()
+            self.selector.register(
+                node_fd,
+                selectors.EVENT_READ,
+                ("node", self.nodes[0]),
+            )
+
         timeout = max(self.poll_ms, 1) / 1000.0
+        node_index = 0
 
         print(
-            f"{self.tun.name}: {self.address}, runtime master, "
+            f"{self.master_tun.name}: {self.address}, "
             f"nodes={','.join(str(node) for node in self.nodes)}"
         )
+        if self.node_tun is not None:
+            print(
+                f"{self.node_tun.namespace}/{self.node_tun.name}: "
+                f"{self.node_tun.address}"
+            )
 
         while True:
             events = self.selector.select(timeout)
             for key, _ in events:
-                if key.fd != fd:
-                    continue
+                side, node = key.data
                 try:
-                    packet = os.read(fd, self.mtu)
+                    packet = os.read(key.fd, self.mtu)
                 except BlockingIOError:
                     continue
-                if packet:
-                    self.transmit_packet(packet)
+                if not packet:
+                    continue
+
+                if side == "master":
+                    self.master_to_node(packet)
+                else:
+                    self.node_to_master(int(node), packet)
 
             if self.nodes and not self.wire_loopback:
                 node = self.nodes[node_index]
@@ -512,8 +608,8 @@ def parse_nodes(value: str) -> list[int]:
         if not item:
             continue
         node = int(item, 0)
-        if node <= 1 or node > 63:
-            raise argparse.ArgumentTypeError("LIN nodes must be in range 2..63")
+        if node < 2 or node > 31:
+            raise argparse.ArgumentTypeError("LIN nodes must be in range 2..31")
         if node not in nodes:
             nodes.append(node)
     if not nodes:
@@ -536,12 +632,15 @@ def main() -> int:
     parser.add_argument(
         "--wire-loopback",
         action="store_true",
-        help="use the other HAT LIN channel as a physical node-2 ICMP test peer",
+        help="use LIN2 as a real node endpoint behind a second Linux namespace",
     )
+    parser.add_argument("--node-namespace", default="beiis-lin-node2")
+    parser.add_argument("--node-ifname", default="lin-node2")
+    parser.add_argument("--node-address", default="10.42.1.2/24")
     args = parser.parse_args()
 
     if os.geteuid() != 0:
-        parser.error("beiis-lin-ip must run as root to create/configure the TUN device")
+        parser.error("beiis-lin-ip must run as root to create/configure TUN devices")
 
     bridge = IpOverLinBridge(
         socket_path=args.socket,
@@ -552,6 +651,9 @@ def main() -> int:
         poll_ms=args.poll_ms,
         mtu=args.mtu,
         wire_loopback=args.wire_loopback,
+        node_namespace=args.node_namespace,
+        node_ifname=args.node_ifname,
+        node_address=args.node_address,
     )
 
     try:
