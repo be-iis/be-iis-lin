@@ -53,6 +53,42 @@ typedef struct {
 
 static lin_slave_ctx_t lin_slave[2];
 
+#define BEIIS_HOST_IRQ_APP_TX   (1u << 0)
+#define BEIIS_HOST_IRQ_LIN1_RX  (1u << 1)
+#define BEIIS_HOST_IRQ_LIN2_RX  (1u << 2)
+
+static volatile uint8_t beiis_host_irq_sources;
+
+static void beiis_host_irq_apply(void) {
+    HAL_GPIO_WritePin(
+        GPIOC,
+        GPIO_PIN_6,
+        beiis_host_irq_sources ? GPIO_PIN_SET : GPIO_PIN_RESET
+    );
+}
+
+static void beiis_host_irq_source(uint8_t source,bool active) {
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
+    if (active) {
+        beiis_host_irq_sources |= source;
+    } else {
+        beiis_host_irq_sources &= (uint8_t)~source;
+    }
+    beiis_host_irq_apply();
+
+    if (!primask) __enable_irq();
+}
+
+static uint8_t beiis_lin_rx_irq_source(uint8_t channel) {
+    return channel == 1 ? BEIIS_HOST_IRQ_LIN1_RX : BEIIS_HOST_IRQ_LIN2_RX;
+}
+
+void beiis_app_host_irq_set(bool active) {
+    beiis_host_irq_source(BEIIS_HOST_IRQ_APP_TX, active);
+}
+
 static bool lin_led_resolve(uint8_t channel,lin_led_t led,GPIO_TypeDef **port,uint16_t *pin) {
     if(channel==1) {
         switch(led) {
@@ -153,6 +189,16 @@ static void beiis_gpio_init(void) {
     g.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(GPIOA, &g);
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4 | GPIO_PIN_8, GPIO_PIN_SET);
+
+    // Isolated host IRQ: PC6. Active-high on the STM32 side.
+    // The Linux side listens for both edges so isolation polarity is irrelevant.
+    g.Pin = GPIO_PIN_6;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOC, &g);
+    beiis_host_irq_sources = 0;
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6, GPIO_PIN_RESET);
 
     // I2C1 target: PB8 SCL, PB9 SDA, AF6 open-drain.
     g.Pin = GPIO_PIN_8 | GPIO_PIN_9;
@@ -546,6 +592,7 @@ int lin_port_slave_rx_set(uint8_t channel,uint8_t id,size_t len,lin_checksum_mod
     ctx->rx_checksum_mode = mode;
     ctx->rx_pos = 0;
     ctx->rx_ready = false;
+    beiis_host_irq_source(beiis_lin_rx_irq_source(channel), false);
     ctx->state = LIN_SLAVE_WAIT_BREAK;
     ctx->rx_enabled = true;
     lin_port_led_set(channel,LIN_LED_RX,false);
@@ -583,6 +630,7 @@ int lin_port_slave_rx_recv(uint8_t channel,uint8_t *data,size_t cap,size_t *len)
     memcpy(data, ctx->rx_data, ctx->rx_len);
     *len = ctx->rx_len;
     ctx->rx_ready = false;
+    beiis_host_irq_source(beiis_lin_rx_irq_source(channel), false);
 
     if (!primask) __enable_irq();
     return 1;
@@ -666,6 +714,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
                     memcpy(ctx->rx_data, ctx->rx_work, ctx->rx_len);
                     __asm volatile ("" ::: "memory");
                     ctx->rx_ready = true;
+                    beiis_host_irq_source(beiis_lin_rx_irq_source(channel), true);
                 }
                 ctx->state = LIN_SLAVE_WAIT_BREAK;
                 lin_port_led_set(channel,LIN_LED_RX,false);
