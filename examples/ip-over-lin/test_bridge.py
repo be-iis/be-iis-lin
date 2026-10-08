@@ -1,51 +1,62 @@
 import unittest
 
-from bridge import Reassembler, fragment_packet, icmp_echo_reply, internet_checksum
+from bridge import Reassembler, downlink_id, fragment_packet, uplink_id
 
 
-def make_echo_request():
-    packet = bytearray(84)
+def make_ipv4_packet(size=84):
+    packet = bytearray(size)
     packet[0] = 0x45
-    packet[2:4] = (84).to_bytes(2, "big")
-    packet[4:6] = (0x1234).to_bytes(2, "big")
+    packet[2:4] = size.to_bytes(2, "big")
     packet[8] = 64
-    packet[9] = 1
+    packet[9] = 17
     packet[12:16] = bytes((10, 42, 1, 1))
     packet[16:20] = bytes((10, 42, 1, 2))
-    packet[20] = 8
-    packet[21] = 0
-    packet[24:26] = (0x4321).to_bytes(2, "big")
-    packet[26:28] = (1).to_bytes(2, "big")
-    for i in range(28, len(packet)):
+    for i in range(20, len(packet)):
         packet[i] = i & 0xFF
-    packet[22:24] = internet_checksum(packet[20:]).to_bytes(2, "big")
-    packet[10:12] = internet_checksum(packet[:20]).to_bytes(2, "big")
     return bytes(packet)
 
 
 class IpBridgeProtocolTest(unittest.TestCase):
     def test_fragment_round_trip(self):
-        packet = make_echo_request()
+        packet = make_ipv4_packet()
         frames = fragment_packet(packet, 7)
         self.assertEqual(len(frames), 14)
+
         reassembler = Reassembler()
         result = None
         for frame in frames:
             result = reassembler.feed(frame)
+
         self.assertEqual(result, packet)
 
-    def test_icmp_echo_reply(self):
-        request = make_echo_request()
-        reply = icmp_echo_reply(request, 2)
-        self.assertIsNotNone(reply)
-        self.assertEqual(reply[12:16], request[16:20])
-        self.assertEqual(reply[16:20], request[12:16])
-        self.assertEqual(reply[20], 0)
-        self.assertEqual(internet_checksum(reply[:20]), 0)
-        self.assertEqual(internet_checksum(reply[20:]), 0)
+    def test_bidirectional_lin_ids_are_distinct(self):
+        self.assertEqual(downlink_id(2), 0x02)
+        self.assertEqual(uplink_id(2), 0x22)
+        self.assertNotEqual(downlink_id(2), uplink_id(2))
 
-    def test_wrong_node_not_answered(self):
-        self.assertIsNone(icmp_echo_reply(make_echo_request(), 3))
+    def test_node_range(self):
+        for node in (2, 3, 15, 31):
+            self.assertLessEqual(uplink_id(node), 0x3F)
+
+        with self.assertRaises(ValueError):
+            downlink_id(1)
+        with self.assertRaises(ValueError):
+            downlink_id(32)
+
+    def test_reassembler_rejects_wrong_sequence(self):
+        packet = make_ipv4_packet()
+        frames = fragment_packet(packet, 3)
+        broken = list(frames)
+        bad = bytearray(broken[1])
+        bad[0] = (bad[0] & 0xC0) | 4
+        broken[1] = bytes(bad)
+
+        reassembler = Reassembler()
+        result = None
+        for frame in broken:
+            result = reassembler.feed(frame)
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
