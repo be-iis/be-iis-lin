@@ -15,7 +15,16 @@ Prerequisite:
 beiis-lind
 ```
 
-and the standard runtime layout installed with:
+For a development daemon on a temporary socket:
+
+```sh
+beiis-lind --socket /tmp/beiis-lin.sock --lock-file /tmp/beiis-lind.lock
+```
+
+Pass `--socket /tmp/beiis-lin.sock` to the Python examples and installer, or
+pass `/tmp/beiis-lin.sock` as the first argument to the C example.
+
+The standard runtime layout must be installed with:
 
 ```sh
 python scripts/install-standard-runtime.py
