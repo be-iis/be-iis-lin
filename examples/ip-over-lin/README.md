@@ -81,7 +81,8 @@ For the throughput part, `iperf3` must be installed on the Pi.
 From the repository root:
 
 ```sh
-.venv/bin/python -m unittest -v examples/ip-over-lin/test_bridge.py
+cd examples/ip-over-lin
+../../.venv/bin/python -m unittest -v test_bridge.py
 ```
 
 or:
