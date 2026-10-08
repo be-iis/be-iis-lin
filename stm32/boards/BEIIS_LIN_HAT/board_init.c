@@ -69,7 +69,6 @@ static void beiis_host_irq_apply(void) {
 
 static void beiis_host_irq_source(uint8_t source,bool active) {
     uint32_t primask = __get_PRIMASK();
-    uint32_t ipsr = __get_IPSR();
     __disable_irq();
 
     if (active) {
@@ -79,10 +78,9 @@ static void beiis_host_irq_source(uint8_t source,bool active) {
     }
     beiis_host_irq_apply();
 
-    // In thread mode restore the previous interrupt state. In an exception
-    // handler leave PRIMASK set until exception return; do not introduce
-    // accidental nested interrupts from this helper.
-    if (!primask && ipsr == 0) __enable_irq();
+    // PRIMASK is not stacked/restored by exception return. Restore exactly
+    // the state that was active on entry, including when called from an ISR.
+    __set_PRIMASK(primask);
 }
 
 static uint8_t beiis_lin_rx_irq_source(uint8_t channel) {
