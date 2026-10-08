@@ -39,6 +39,8 @@ int lin_port_tx(uint8_t channel,const uint8_t *data,size_t len,uint32_t timeout_
 int lin_port_rx(uint8_t channel,uint8_t *data,size_t len,uint32_t timeout_ms);
 int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode);
 int lin_port_slave_clear(uint8_t channel);
+int lin_port_slave_rx_set(uint8_t channel,uint8_t id,size_t len,lin_checksum_mode_t mode);
+int lin_port_slave_rx_recv(uint8_t channel,uint8_t *data,size_t cap,size_t *len);
 void lin_port_led_set(uint8_t channel,lin_led_t led,bool on);
 void lin_port_led_set_mask(uint8_t mask);
 uint8_t lin_port_led_get_mask(void);
@@ -49,6 +51,8 @@ lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_check
 lin_result_t lin_master_request_raw(uint8_t channel,uint8_t id,uint8_t *buf,size_t len,uint32_t timeout_ms);
 lin_result_t lin_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode);
 lin_result_t lin_slave_clear(uint8_t channel);
+lin_result_t lin_slave_rx_set(uint8_t channel,uint8_t id,size_t len,lin_checksum_mode_t mode);
+lin_result_t lin_slave_rx_recv(uint8_t channel,uint8_t *data,size_t cap,size_t *len);
 
 void lin_led_set_mask(uint8_t mask);
 uint8_t lin_led_get_mask(void);
