@@ -39,11 +39,6 @@ cleanup() {
   fi
 
   if [[ -n "$daemon_pid" ]]; then
-    # Restore normal firmware boot state through the same Unix socket path.
-    if [[ -S "$socket" ]]; then
-      "$venv/bin/beiis-lin" --socket "$socket" exec "import machine; machine.reset()" >/dev/null 2>&1 || true
-      sleep 0.2
-    fi
     kill "$daemon_pid" 2>/dev/null || true
     wait "$daemon_pid" 2>/dev/null || true
   fi
@@ -71,7 +66,7 @@ done
   exit 1
 }
 
-"$venv/bin/python" "$example/bridge.py"   --socket "$socket"   --ifname lin0   --address "${LIN_LOCAL_IP:-10.42.1.1/24}"   --channel 1   --nodes 2   --wire-loopback   --loopback-slave-channel 2   >"$bridge_log" 2>&1 &
+"$venv/bin/python" "$example/bridge.py"   --socket "$socket"   --ifname lin0   --address "${LIN_LOCAL_IP:-10.42.1.1/24}"   --nodes 2   --wire-loopback   >"$bridge_log" 2>&1 &
 bridge_pid=$!
 
 for _ in $(seq 1 100); do
