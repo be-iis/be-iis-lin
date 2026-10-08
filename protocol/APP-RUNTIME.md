@@ -188,3 +188,10 @@ framing protocol.
 
 If GPIO event access is unavailable, the host may fall back to polling without
 changing the I2C protocol.
+
+
+## User-level examples
+
+For master/slave operations, query routing, custom query-backed workers, logging,
+and C/Python socket examples, see `../docs/human/RUNTIME_GUIDE.md` and
+`../examples/runtime/`.
