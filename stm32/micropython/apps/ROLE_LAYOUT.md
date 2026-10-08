@@ -60,6 +60,8 @@ Operations:
 - `0x05` SLAVE_CLEAR
 - `0x06` LEDS_GET
 - `0x07` LEDS_SET, followed by mask
+- `0x08` SLAVE_RX_SET, followed by id, flags, receive length
+- `0x09` SLAVE_RX_RECV, non-blocking receive of a configured slave frame
 
 Flag bit 0 selects enhanced checksum; clear selects classic checksum.
 
