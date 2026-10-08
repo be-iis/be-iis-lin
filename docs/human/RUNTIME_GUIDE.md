@@ -37,7 +37,42 @@ The normal production path is the persistent MicroPython runtime. Direct Raw
 REPL access exists for development and recovery, but it is not the normal
 application path.
 
-## 2. Standard nine-instance runtime
+## 2. Start the Linux daemon
+
+Normal applications should connect to `beiis-lind`; they should not open I2C
+independently.
+
+Production/default socket:
+
+```text
+/run/beiis/lin-hat.sock
+```
+
+For development, a user-writable temporary socket is convenient:
+
+```sh
+. .venv/bin/activate
+
+beiis-lind \
+  --bus 1 \
+  --address 0x42 \
+  --socket /tmp/beiis-lin.sock \
+  --lock-file /tmp/beiis-lind.lock
+```
+
+Check the connection from another shell:
+
+```sh
+beiis-lin --socket /tmp/beiis-lin.sock info
+```
+
+The daemon should report the device protocol and, on Raspberry Pi hardware,
+GPIO6 IRQ information.
+
+Only one process should own the HAT I2C endpoint. Do not run a direct-I2C client
+while `beiis-lind` is using the same bus/address.
+
+## 3. Standard nine-instance runtime
 
 The standard installation uses nine of the sixteen available runtime slots:
 
@@ -90,7 +125,7 @@ The actual LIN operation is encoded in the binary request sent to
 
 The same rule applies to slave and logging query pairs.
 
-## 3. Selecting a query path
+## 4. Selecting a query path
 
 Pi -> STM application traffic is delivered to exactly one active instance slot.
 The active slot is selected natively and does not require Raw REPL.
@@ -128,7 +163,7 @@ Expected native reply:
 Application channel 0 is used by the standard query layout. The runtime itself
 supports user channels 0..31.
 
-## 4. Generic native LIN RPC
+## 5. Generic native LIN RPC
 
 Both `master_native` and `slave_native` run the same `lin_native.py`.
 Only their configured physical LIN channel differs.
@@ -179,11 +214,11 @@ Flag bit 0 selects checksum type:
 | 0x08 | SLAVE_RX_SET | id, flags, len |
 | 0x09 | SLAVE_RX_RECV | none |
 
-## 5. Master operation
+## 6. Master operation
 
 The standard master worker owns LIN1.
 
-### 5.1 Master transmit
+### 6.1 Master transmit
 
 A master-published LIN frame uses `SEND`:
 
@@ -206,7 +241,7 @@ _, _, reply = c.data_recv(instance=1, channel=0, timeout=2.0)
 assert reply == b"\x02\x00"
 ```
 
-### 5.2 Master request / receive slave response
+### 6.2 Master request / receive slave response
 
 A master request sends a LIN header and receives the slave response:
 
@@ -244,7 +279,7 @@ data = reply[3:3 + length]
 print(data.hex(" "))
 ```
 
-## 6. Slave operation
+## 7. Slave operation
 
 The standard slave worker owns LIN2.
 
@@ -256,7 +291,7 @@ c.set_active_instance(3)
 
 Replies are read from slot 4.
 
-### 6.1 Configure a slave response
+### 7.1 Configure a slave response
 
 `SLAVE_SET` prepares data that will be transmitted when an external master
 requests the configured identifier:
@@ -276,7 +311,7 @@ _, _, reply = c.data_recv(instance=4, channel=0)
 assert reply == b"\x05\x00"
 ```
 
-### 6.2 Receive a master-published frame as slave
+### 7.2 Receive a master-published frame as slave
 
 Configure one receive identifier:
 
@@ -308,7 +343,7 @@ receive buffer are configured per LIN channel. Applications that need a queue or
 multiple receive identifiers should add that policy above the native primitive
 or extend the native layer deliberately.
 
-## 7. Change LIN baud rate
+## 8. Change LIN baud rate
 
 The standard instances start at 19200 baud.
 
@@ -327,7 +362,7 @@ The current native LIN core accepts 1000..20000 bit/s.
 For a persistent default, change the `baud` field in the instance
 configuration and restart that instance.
 
-## 8. Query instances
+## 9. Query instances
 
 `query.py` is deliberately small and reusable.
 
@@ -365,7 +400,7 @@ Linux protocol/application
 
 The worker can be replaced without changing the Linux socket protocol.
 
-## 9. Writing your own query-backed worker
+## 10. Writing your own query-backed worker
 
 You normally reuse `query.py` and write only the middle worker.
 
@@ -439,7 +474,7 @@ ctx.api_version
 Instances can claim resources such as `lin1` or `lin2`. The runtime prevents
 two running instances from owning the same named resource.
 
-## 10. Logging
+## 11. Logging
 
 The standard topology already contains:
 
@@ -487,7 +522,7 @@ filter.
 
 This is separate from passive electrical LIN sniffing.
 
-## 11. Direct native MicroPython control
+## 12. Direct native MicroPython control
 
 The standard runtime owns the MicroPython interpreter while it is running.
 Direct `lin` module access is therefore a development/debug path.
@@ -529,7 +564,7 @@ The CLI wrappers `lin-init`, `lin-send`, `lin-request`,
 `lin-slave-set` and `lin-slave-clear` use this Raw-REPL path. They are useful
 for bring-up but are not replacements for the persistent query runtime.
 
-## 12. Flashing firmware
+## 13. Flashing firmware
 
 There are two separate cases.
 
@@ -587,7 +622,7 @@ by a normal application update.
 Re-run `scripts/install-standard-runtime.py` only when the installed runtime
 applications/configuration themselves need to change.
 
-## 13. Python through the Unix socket
+## 14. Python through the Unix socket
 
 Use `DaemonClient`; do not open I2C from every application.
 
@@ -614,7 +649,7 @@ finally:
 A more complete executable example is
 `examples/runtime/python_basic.py`.
 
-## 14. C through the Unix socket
+## 15. C through the Unix socket
 
 The socket is a normal Unix-domain `SOCK_SEQPACKET` endpoint. The wire format
 is UTF-8 JSON. C applications do not need an I2C library.
@@ -650,7 +685,7 @@ The executable C example is `examples/runtime/c_basic.c`.
 For production C code, use a real JSON parser. The supplied C file keeps parsing
 minimal on purpose so the socket mechanics remain visible.
 
-## 15. Host IRQ
+## 16. Host IRQ
 
 STM32 PC6 is connected through the isolation stage to Raspberry Pi GPIO6.
 
@@ -667,7 +702,7 @@ available, normal application receive falls back to polling.
 The I2C count/status registers remain the source of truth; the GPIO is a wakeup
 hint, not a replacement for transport framing.
 
-## 16. Recommended application structure
+## 17. Recommended application structure
 
 For a normal application, keep this boundary:
 
