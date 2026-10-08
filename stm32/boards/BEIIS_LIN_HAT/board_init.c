@@ -25,18 +25,30 @@ typedef enum {
     LIN_SLAVE_WAIT_SYNC,
     LIN_SLAVE_WAIT_PID,
     LIN_SLAVE_TX,
+    LIN_SLAVE_RX,
 } lin_slave_state_t;
 
 typedef struct {
-    volatile bool enabled;
+    volatile bool tx_enabled;
+    volatile bool rx_enabled;
     volatile lin_slave_state_t state;
-    uint8_t id;
-    uint8_t len;
-    uint8_t data[8];
-    lin_checksum_mode_t checksum_mode;
+
+    uint8_t tx_id;
+    uint8_t tx_data_len;
+    uint8_t tx_data[8];
+    lin_checksum_mode_t tx_checksum_mode;
     uint8_t tx[9];
     volatile uint8_t tx_len;
     volatile uint8_t tx_pos;
+
+    uint8_t rx_id;
+    uint8_t rx_len;
+    lin_checksum_mode_t rx_checksum_mode;
+    uint8_t rx_work[9];
+    volatile uint8_t rx_pos;
+    uint8_t rx_data[8];
+    volatile bool rx_ready;
+    uint8_t rx_pid;
 } lin_slave_ctx_t;
 
 static lin_slave_ctx_t lin_slave[2];
@@ -470,16 +482,17 @@ int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len
     uint32_t primask = __get_PRIMASK();
     __disable_irq();
 
-    ctx->id = id;
-    ctx->len = (uint8_t)len;
-    memcpy(ctx->data, data, len);
-    ctx->checksum_mode = mode;
+    ctx->tx_id = id;
+    ctx->tx_data_len = (uint8_t)len;
+    memcpy(ctx->tx_data, data, len);
+    ctx->tx_checksum_mode = mode;
     ctx->tx_len = 0;
     ctx->tx_pos = 0;
     ctx->state = LIN_SLAVE_WAIT_BREAK;
-    ctx->enabled = true;
+    ctx->tx_enabled = true;
     lin_port_led_set(channel,LIN_LED_RX,false);
     lin_port_led_set(channel,LIN_LED_TX,false);
+    lin_port_led_set(channel,LIN_LED_SLAVE,true);
 
     USART_TypeDef *u = h->Instance;
     u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
@@ -499,16 +512,80 @@ int lin_port_slave_clear(uint8_t channel) {
     lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
     if (!h || !ctx) return -1;
 
-    ctx->enabled = false;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
+    ctx->tx_enabled = false;
     ctx->state = LIN_SLAVE_WAIT_BREAK;
     ctx->tx_len = 0;
     ctx->tx_pos = 0;
     lin_port_led_set(channel,LIN_LED_RX,false);
     lin_port_led_set(channel,LIN_LED_TX,false);
 
-    h->Instance->CR2 &= ~USART_CR2_LBDIE;
-    h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE);
+    h->Instance->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
+    if (!ctx->rx_enabled) {
+        h->Instance->CR2 &= ~USART_CR2_LBDIE;
+        h->Instance->CR1 &= ~USART_CR1_RXNEIE_RXFNEIE;
+        lin_port_led_set(channel,LIN_LED_SLAVE,false);
+    }
+
+    if (!primask) __enable_irq();
     return 0;
+}
+
+int lin_port_slave_rx_set(uint8_t channel,uint8_t id,size_t len,lin_checksum_mode_t mode) {
+    UART_HandleTypeDef *h = lin_handle(channel);
+    lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
+    if (!h || !ctx || len > 8 || id > 0x3f || h->gState == HAL_UART_STATE_RESET) return -1;
+
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
+    ctx->rx_id = id;
+    ctx->rx_len = (uint8_t)len;
+    ctx->rx_checksum_mode = mode;
+    ctx->rx_pos = 0;
+    ctx->rx_ready = false;
+    ctx->state = LIN_SLAVE_WAIT_BREAK;
+    ctx->rx_enabled = true;
+    lin_port_led_set(channel,LIN_LED_RX,false);
+    lin_port_led_set(channel,LIN_LED_SLAVE,true);
+
+    USART_TypeDef *u = h->Instance;
+    u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
+    u->CR2 |= USART_CR2_LBDIE;
+    u->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+
+    IRQn_Type irqn = channel == 1 ? USART1_IRQn : USART2_IRQn;
+    NVIC_SetPriority(irqn, IRQ_PRI_UART);
+    NVIC_EnableIRQ(irqn);
+
+    if (!primask) __enable_irq();
+    return 0;
+}
+
+int lin_port_slave_rx_recv(uint8_t channel,uint8_t *data,size_t cap,size_t *len) {
+    lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
+    if (!ctx || !data || !len) return -1;
+
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+
+    if (!ctx->rx_ready) {
+        if (!primask) __enable_irq();
+        return 0;
+    }
+    if (cap < ctx->rx_len) {
+        if (!primask) __enable_irq();
+        return -1;
+    }
+
+    memcpy(data, ctx->rx_data, ctx->rx_len);
+    *len = ctx->rx_len;
+    ctx->rx_ready = false;
+
+    if (!primask) __enable_irq();
+    return 1;
 }
 
 void beiis_lin_uart_irq(uint8_t channel) {
@@ -519,7 +596,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
     USART_TypeDef *u = h->Instance;
     uint32_t isr = u->ISR;
 
-    if (!ctx->enabled) {
+    if (!ctx->tx_enabled && !ctx->rx_enabled) {
         if (isr & USART_ISR_RXNE_RXFNE) {
             (void)u->RDR;
         }
@@ -535,6 +612,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
         ctx->state = LIN_SLAVE_WAIT_SYNC;
         ctx->tx_pos = 0;
         ctx->tx_len = 0;
+        ctx->rx_pos = 0;
     }
 
     if (isr & USART_ISR_RXNE_RXFNE) {
@@ -542,26 +620,56 @@ void beiis_lin_uart_irq(uint8_t channel) {
 
         if (ctx->state == LIN_SLAVE_WAIT_SYNC) {
             ctx->state = (v == 0x55) ? LIN_SLAVE_WAIT_PID : LIN_SLAVE_WAIT_BREAK;
-            if(ctx->state==LIN_SLAVE_WAIT_BREAK) {
+            if (ctx->state == LIN_SLAVE_WAIT_BREAK) {
                 lin_port_led_set(channel,LIN_LED_RX,false);
             }
         } else if (ctx->state == LIN_SLAVE_WAIT_PID) {
-            if (lin_pid_valid(v) && ((v & 0x3f) == ctx->id)) {
-                memcpy(ctx->tx, ctx->data, ctx->len);
-                ctx->tx[ctx->len] = lin_checksum(v, ctx->data, ctx->len, ctx->checksum_mode);
-                ctx->tx_len = ctx->len + 1;
-                ctx->tx_pos = 0;
-                ctx->state = LIN_SLAVE_TX;
-                lin_port_led_set(channel,LIN_LED_TX,true);
-
-                // Arm TXE interrupt only. Do not write TDR here because
-                // 'isr' is a snapshot from before the PID was processed; using
-                // it again below could enqueue a second byte in the same IRQ.
-                u->CR1 |= USART_CR1_TXEIE_TXFNFIE;
+            if (!lin_pid_valid(v)) {
+                ctx->state = LIN_SLAVE_WAIT_BREAK;
+                lin_port_led_set(channel,LIN_LED_RX,false);
+            } else {
+                uint8_t id = v & 0x3f;
+                if (ctx->tx_enabled && id == ctx->tx_id) {
+                    memcpy(ctx->tx, ctx->tx_data, ctx->tx_data_len);
+                    ctx->tx[ctx->tx_data_len] = lin_checksum(v, ctx->tx_data, ctx->tx_data_len, ctx->tx_checksum_mode);
+                    ctx->tx_len = ctx->tx_data_len + 1;
+                    ctx->tx_pos = 0;
+                    ctx->state = LIN_SLAVE_TX;
+                    lin_port_led_set(channel,LIN_LED_RX,false);
+                    lin_port_led_set(channel,LIN_LED_TX,true);
+                    u->CR1 |= USART_CR1_TXEIE_TXFNFIE;
+                } else if (ctx->rx_enabled && id == ctx->rx_id) {
+                    ctx->rx_pid = v;
+                    ctx->rx_pos = 0;
+                    ctx->state = LIN_SLAVE_RX;
+                } else {
+                    ctx->state = LIN_SLAVE_WAIT_BREAK;
+                    lin_port_led_set(channel,LIN_LED_RX,false);
+                }
+            }
+        } else if (ctx->state == LIN_SLAVE_RX) {
+            if (ctx->rx_pos < sizeof(ctx->rx_work)) {
+                ctx->rx_work[ctx->rx_pos++] = v;
             } else {
                 ctx->state = LIN_SLAVE_WAIT_BREAK;
+                lin_port_led_set(channel,LIN_LED_RX,false);
             }
-            lin_port_led_set(channel,LIN_LED_RX,false);
+
+            if (ctx->state == LIN_SLAVE_RX && ctx->rx_pos == (uint8_t)(ctx->rx_len + 1)) {
+                uint8_t expected = lin_checksum(
+                    ctx->rx_pid,
+                    ctx->rx_work,
+                    ctx->rx_len,
+                    ctx->rx_checksum_mode
+                );
+                if (ctx->rx_work[ctx->rx_len] == expected) {
+                    memcpy(ctx->rx_data, ctx->rx_work, ctx->rx_len);
+                    __asm volatile ("" ::: "memory");
+                    ctx->rx_ready = true;
+                }
+                ctx->state = LIN_SLAVE_WAIT_BREAK;
+                lin_port_led_set(channel,LIN_LED_RX,false);
+            }
         }
     }
 
@@ -582,6 +690,5 @@ void beiis_lin_uart_irq(uint8_t channel) {
     if (err & USART_ISR_NE) clear |= USART_ICR_NECF;
     if (clear) u->ICR = clear;
 }
-
 
 #endif // !BUILDING_MBOOT
