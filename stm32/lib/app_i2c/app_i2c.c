@@ -17,12 +17,20 @@ static fifo_t rx_fifo;
 static fifo_t tx_fifo;
 static volatile uint8_t active_instance;
 
+__attribute__((weak)) void beiis_app_host_irq_set(bool active) {
+    (void)active;
+}
+
 static uint16_t fifo_count(const fifo_t *fifo) {
     return (uint16_t)((fifo->head - fifo->tail) & FIFO_MASK);
 }
 
 static uint16_t fifo_free(const fifo_t *fifo) {
     return (uint16_t)((BEIIS_APP_FIFO_SIZE - 1) - fifo_count(fifo));
+}
+
+static void update_host_irq(void) {
+    beiis_app_host_irq_set(fifo_count(&tx_fifo) != 0);
 }
 
 static int fifo_push(fifo_t *fifo, uint8_t value) {
@@ -52,6 +60,7 @@ void beiis_app_i2c_init(void) {
     rx_fifo.head = rx_fifo.tail = 0;
     tx_fifo.head = tx_fifo.tail = 0;
     active_instance = 0;
+    update_host_irq();
 }
 
 size_t beiis_app_host_write(const uint8_t *src, size_t len) {
@@ -67,6 +76,7 @@ size_t beiis_app_host_read(uint8_t *dst, size_t len) {
     while (done < len && fifo_pop(&tx_fifo, &dst[done])) {
         ++done;
     }
+    update_host_irq();
     return done;
 }
 
@@ -87,6 +97,7 @@ size_t beiis_app_host_consume(size_t len) {
     while (done < len && fifo_pop(&tx_fifo, &discard)) {
         ++done;
     }
+    update_host_irq();
     return done;
 }
 
@@ -120,6 +131,7 @@ void beiis_app_control(uint8_t value) {
     if (value & 0x01) {
         rx_fifo.head = rx_fifo.tail = 0;
         tx_fifo.head = tx_fifo.tail = 0;
+        update_host_irq();
     }
 }
 
@@ -215,5 +227,6 @@ int beiis_app_try_send(uint8_t instance, uint8_t channel, const uint8_t *src, si
     }
     __asm volatile ("" ::: "memory");
     tx_fifo.head = head;
+    update_host_irq();
     return 1;
 }
