@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import binascii
 from pathlib import Path
 
@@ -33,7 +34,11 @@ def install_app(c: DaemonClient, path: Path) -> None:
 
 
 def main() -> int:
-    c = DaemonClient()
+    p = argparse.ArgumentParser()
+    p.add_argument("--socket", default="/run/beiis/lin-hat.sock")
+    args = p.parse_args()
+
+    c = DaemonClient(args.socket)
     try:
         apps = c.runtime_call("app_list")
         if "query" not in apps:
