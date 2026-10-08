@@ -42,8 +42,8 @@ host/application
 All six query instances use the same `query.py`. Master and slave both use the
 same `lin_native.py`; the configured LIN channel is the only difference.
 
-The payload above this boundary is not tied to IP or any other upper-layer
-protocol. `lin_native.py` exposes generic binary LIN operations only.
+The payload above this boundary is application-agnostic. `lin_native.py`
+exposes generic binary LIN operations only.
 
 ## Generic LIN RPC
 
