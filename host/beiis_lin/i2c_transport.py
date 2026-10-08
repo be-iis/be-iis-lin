@@ -2,6 +2,8 @@ from __future__ import annotations
 import time
 from smbus2 import SMBus, i2c_msg
 
+from .gpio_irq import HostGpioIrq
+
 REG_STATUS=0x00
 REG_RX_FREE=0x01
 REG_TX_COUNT=0x02
@@ -25,15 +27,33 @@ REG_APP_ACTIVE_INSTANCE=0x37
 APP_MGMT_CHANNEL=0xFF
 
 class I2CBytePipe:
-    def __init__(self,bus:int=1,address:int=0x42,block_size:int=32,poll_s:float=0.001):
+    def __init__(
+        self,
+        bus:int=1,
+        address:int=0x42,
+        block_size:int=32,
+        poll_s:float=0.001,
+        irq_gpio:int|None=None,
+        irq_chip:str|None=None,
+    ):
         self.address=address
         self.block_size=block_size
         self.poll_s=poll_s
         self.bus=SMBus(bus)
         self._app_bytes=bytearray()
         self._app_frames=[]
+        self.irq=None
+        self.irq_error=None
+        if irq_gpio is not None:
+            try:
+                self.irq=HostGpioIrq(offset=int(irq_gpio),chip=irq_chip)
+            except OSError as exc:
+                self.irq_error=repr(exc)
 
     def close(self):
+        if self.irq is not None:
+            self.irq.close()
+            self.irq=None
         self.bus.close()
 
     def _read_reg(self,reg:int,n:int)->bytes:
@@ -207,6 +227,23 @@ class I2CBytePipe:
             self._write_reg(REG_APP_RX_DATA,frame[pos:pos+n])
             pos+=n
 
+    def wait_irq(self,timeout:float=1.0)->bool:
+        if self.irq is None:
+            time.sleep(max(0.0,min(float(timeout),self.poll_s)))
+            return False
+        return self.irq.wait(timeout=max(0.0,float(timeout)))
+
+    def drain_irq(self):
+        if self.irq is not None:
+            self.irq.drain()
+
+    def irq_info(self)->dict:
+        return {
+            "enabled":self.irq is not None,
+            "description":self.irq.description if self.irq is not None else None,
+            "error":self.irq_error,
+        }
+
     def app_recv(self,instance:int|None=None,channel:int|None=None,timeout:float=2.0):
         frame=self._app_take_frame(instance,channel)
         if frame is not None:
@@ -221,6 +258,13 @@ class I2CBytePipe:
                 frame=self._app_take_frame(instance,channel)
                 if frame is not None:
                     return frame
+                continue
+
+            remaining=max(0.0,deadline-time.monotonic())
+            if remaining<=0:
+                break
+            if self.irq is not None:
+                self.irq.wait(timeout=remaining)
             else:
-                time.sleep(self.poll_s)
+                time.sleep(min(self.poll_s,remaining))
         raise TimeoutError("timeout waiting for STM32 application data")
