@@ -78,6 +78,24 @@ done
   exit 1
 }
 
+echo
+echo "Host IRQ:"
+"$venv/bin/python" - "$socket" <<'PY'
+import sys
+from beiis_lin.client import DaemonClient
+
+c = DaemonClient(sys.argv[1])
+try:
+    info = c.info()
+finally:
+    c.close()
+
+irq = info.get("irq") or {}
+print(irq)
+if not irq.get("enabled"):
+    raise SystemExit("GPIO host IRQ is not active; refusing IRQ performance test")
+PY
+
 "$venv/bin/python" "$example/bridge.py"   --socket "$socket"   --ifname lin0   --address "${LIN_LOCAL_IP:-10.42.1.1/24}"   --nodes 2   --wire-loopback   --node-namespace "$namespace"   --node-address "${LIN_NODE_IP:-10.42.1.2/24}"   >"$bridge_log" 2>&1 &
 bridge_pid=$!
 
