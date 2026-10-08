@@ -45,7 +45,6 @@ Not yet fully verified/implemented:
 - scheduler
 - sleep/wakeup
 - LIN diagnostic transport layer
-- daemon use of GPIO6 IRQ for asynchronous events
 
 ## Universal runtime instance path
 
@@ -62,6 +61,8 @@ Verified on real hardware:
 
 Prepared, not yet hardware verified:
 
+- GPIO6-driven host wakeup in beiis-lind using Linux GPIO character ABI v2
+- level-based PC6 host IRQ for application TX data and native LIN slave RX
 - generic interrupt-driven slave receive of master-published LIN frames
 - separate downlink/uplink frame identifiers per logical node
 - real second Linux IPv4 endpoint in a network namespace
