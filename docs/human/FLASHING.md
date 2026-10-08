@@ -53,3 +53,38 @@ Direct invocation:
 beiis-lin --bus 1 --address 0x42 flash \
   build/micropython/ports/stm32/build-BEIIS_LIN_HAT/firmware.bin
 ```
+
+
+## Daemon ownership during field updates
+
+Only one process should own the HAT I2C endpoint.
+
+If `beiis-lind` is stopped, a direct field update is appropriate:
+
+```sh
+beiis-lin --direct flash \
+  build/micropython/ports/stm32/build-BEIIS_LIN_HAT/firmware.bin
+```
+
+If `beiis-lind` is already running, use the normal socket path instead of
+opening I2C in parallel:
+
+```sh
+beiis-lin flash \
+  build/micropython/ports/stm32/build-BEIIS_LIN_HAT/firmware.bin
+```
+
+The daemon-side `flash` operation receives a filesystem path on the same Linux
+host.
+
+## Runtime filesystem retention
+
+The mboot application update programs the application region only. The
+MicroPython filesystem is outside that region, so installed runtime applications
+and `/flash/beiis/instances.json` are retained by a normal application update.
+
+Re-run `scripts/install-standard-runtime.py` when the installed applications
+or standard instance configuration changed, not merely because application
+firmware was updated.
+
+For the complete runtime workflow, see `RUNTIME_GUIDE.md`.
