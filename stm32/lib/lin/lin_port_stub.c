@@ -18,3 +18,10 @@ __attribute__((weak)) int lin_port_slave_set(uint8_t channel,uint8_t id,const ui
 __attribute__((weak)) int lin_port_slave_clear(uint8_t channel) {
     (void)channel; return -1;
 }
+
+__attribute__((weak)) int lin_port_slave_rx_set(uint8_t channel,uint8_t id,size_t len,lin_checksum_mode_t mode) {
+    (void)channel; (void)id; (void)len; (void)mode; return -1;
+}
+__attribute__((weak)) int lin_port_slave_rx_recv(uint8_t channel,uint8_t *data,size_t cap,size_t *len) {
+    (void)channel; (void)data; (void)cap; (void)len; return -1;
+}
