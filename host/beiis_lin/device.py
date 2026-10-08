@@ -7,8 +7,19 @@ from .raw_repl import RawRepl
 from .mboot import MbootClient
 
 class LinHat:
-    def __init__(self,bus:int=1,address:int=0x42):
-        self.transport=I2CBytePipe(bus,address)
+    def __init__(
+        self,
+        bus:int=1,
+        address:int=0x42,
+        irq_gpio:int|None=None,
+        irq_chip:str|None=None,
+    ):
+        self.transport=I2CBytePipe(
+            bus,
+            address,
+            irq_gpio=irq_gpio,
+            irq_chip=irq_chip,
+        )
         self.repl=RawRepl(self.transport)
         self._app_request_id=1
 
@@ -157,6 +168,15 @@ class LinHat:
 
     def data_recv(self,instance:int|None=None,channel:int|None=None,timeout:float=2.0):
         return self.transport.app_recv(instance=instance,channel=channel,timeout=timeout)
+
+    def wait_irq(self,timeout:float=1.0)->bool:
+        return self.transport.wait_irq(timeout)
+
+    def drain_irq(self):
+        self.transport.drain_irq()
+
+    def irq_info(self)->dict:
+        return self.transport.irq_info()
 
     def runtime_call(self,op:str,args:dict|None=None,timeout:float=2.0):
         request_id=self._app_request_id
