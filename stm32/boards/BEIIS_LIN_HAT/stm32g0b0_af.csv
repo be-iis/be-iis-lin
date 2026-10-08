@@ -1,0 +1,15 @@
+Port ,Pin ,AF0,AF1,AF2,AF3,AF4,AF5,AF6,AF7,AF8,AF9,AF10,AF11,AF12,AF13,AF14,AF15,ADC
+     ,    ,AF0,AF1,AF2,AF3,AF4,AF5,AF6,AF7,AF8,AF9,AF10,AF11,AF12,AF13,AF14,AF15,ADC
+PortA,PA0 ,,,,,,,,,,,,,,,,ADC1_IN0
+PortA,PA1 ,,,,,,,,,,,,,,,,ADC1_IN1
+PortA,PA2 ,,USART2_TX,,,,,,,,,,,,,,ADC1_IN2
+PortA,PA3 ,,USART2_RX,,,,,,,,,,,,,,ADC1_IN3
+PortA,PA4 ,,,,,,,,,,,,,,,,ADC1_IN4
+PortA,PA8 ,,,,,,,,,,,,,,,,,
+PortA,PA13,SWDIO,,,,,,,,,,,,,,,,
+PortA,PA14,SWCLK,,,,,,,,,,,,,,,,
+PortB,PB6 ,USART1_TX,,,,,,I2C1_SCL,,,,,,,,,
+PortB,PB7 ,USART1_RX,,,,,,I2C1_SDA,,,,,,,,,
+PortB,PB8 ,,,,,,,I2C1_SCL,,,,,,,,,
+PortB,PB9 ,,,,,,,I2C1_SDA,,,,,,,,,
+PortC,PC6 ,,,,,,,,,,,,,,,,,
