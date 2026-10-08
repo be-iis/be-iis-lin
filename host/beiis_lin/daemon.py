@@ -34,11 +34,22 @@ class LinHatService:
         return bytes.fromhex(value)
 
     def dispatch(self, op: str, args: dict, progress=None):
+        # GPIO IRQ waiting never touches I2C and must not hold the device lock.
+        if op == "wait_irq":
+            return {
+                "event": self.device.wait_irq(float(args.get("timeout", 1.0))),
+                "irq": self.device.irq_info(),
+            }
+        if op == "drain_irq":
+            self.device.drain_irq()
+            return {"ok": True}
+
         with self.lock:
             if op == "info":
                 return {
                     "daemon_protocol": PROTOCOL_VERSION,
                     "device": self.device.ping(),
+                    "irq": self.device.irq_info(),
                 }
             if op == "ping":
                 return self.device.ping()
@@ -125,11 +136,15 @@ class LinHatDaemon:
         socket_path: str = DEFAULT_SOCKET_PATH,
         socket_mode: int = 0o660,
         lock_path: str | None = None,
+        irq_gpio: int | None = 6,
+        irq_chip: str | None = None,
     ):
         self.bus = bus
         self.address = address
         self.socket_path = Path(socket_path)
         self.socket_mode = socket_mode
+        self.irq_gpio = irq_gpio
+        self.irq_chip = irq_chip
         self.lock_path = Path(lock_path or f"/run/lock/beiis-lind-i2c{bus}.lock")
         self.stop_event = threading.Event()
         self.server = None
@@ -206,7 +221,12 @@ class LinHatDaemon:
 
     def serve_forever(self):
         self._acquire_lock()
-        self.device = LinHat(self.bus, self.address)
+        self.device = LinHat(
+            self.bus,
+            self.address,
+            irq_gpio=self.irq_gpio,
+            irq_chip=self.irq_chip,
+        )
         self.service = LinHatService(self.device)
         self._prepare_socket()
 
@@ -254,6 +274,9 @@ def main():
     parser.add_argument("--socket", default=DEFAULT_SOCKET_PATH)
     parser.add_argument("--mode", type=lambda x: int(x, 8), default=0o660)
     parser.add_argument("--lock-file")
+    parser.add_argument("--irq-gpio", type=int, default=6)
+    parser.add_argument("--irq-chip")
+    parser.add_argument("--no-irq", action="store_true")
     args = parser.parse_args()
 
     daemon = LinHatDaemon(
@@ -262,6 +285,8 @@ def main():
         socket_path=args.socket,
         socket_mode=args.mode,
         lock_path=args.lock_file,
+        irq_gpio=None if args.no_irq else args.irq_gpio,
+        irq_chip=args.irq_chip,
     )
 
     def stop(_signum, _frame):
