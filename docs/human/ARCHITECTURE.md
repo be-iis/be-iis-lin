@@ -54,7 +54,14 @@ separate recovery/development byte pipe.
 | SWCLK | PA14 |
 
 The isolated IRQ path from STM32 PC6 to Raspberry Pi GPIO6 has been verified on
-hardware. The current daemon does not yet use that IRQ for asynchronous events.
+hardware. PC6 is now a level-based "host data available" notification. The
+STM32 asserts it while application TX data or a completed native LIN slave-RX
+frame is pending.
+
+`beiis-lind` requests Raspberry Pi GPIO6 through the Linux GPIO character
+device v2 API and listens to both edges. Application receive waits use GPIO6
+instead of 1-ms I2C polling when the line is available. If GPIO access is not
+available, the host transport falls back to the previous polling behaviour.
 
 
 ## Runtime and recovery path
