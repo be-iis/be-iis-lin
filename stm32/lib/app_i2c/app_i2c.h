@@ -45,3 +45,9 @@ int beiis_app_set_active_instance(uint8_t instance);
 int beiis_app_rx_peek(uint8_t *channel, size_t *payload_len);
 int beiis_app_recv(uint8_t *channel, uint8_t *dst, size_t cap, size_t *payload_len);
 int beiis_app_try_send(uint8_t instance, uint8_t channel, const uint8_t *src, size_t len);
+
+/*
+ * Board hook for the isolated STM32 -> host IRQ line.
+ * active=true means application TX data is pending for the host.
+ */
+void beiis_app_host_irq_set(bool active);
