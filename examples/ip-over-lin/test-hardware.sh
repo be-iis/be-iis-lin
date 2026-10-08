@@ -144,21 +144,19 @@ if ! command -v iperf3 >/dev/null 2>&1; then
 fi
 
 echo
-echo "Starting iperf3 server inside $namespace ..."
+echo "Running low-rate UDP iperf3 baseline ..."
 ip netns exec "$namespace" iperf3 -s -1 -B "$peer" >"$iperf_server_log" 2>&1 &
 iperf_pid=$!
-
 sleep 0.5
 
-echo "Running short TCP iperf3 test over LIN ..."
-if ! timeout "${IPERF_TIMEOUT:-90}"   iperf3 -c "$peer" -t "${IPERF_SECONDS:-3}" -P 1 -M "${IPERF_MSS:-256}"; then
+if ! timeout "${IPERF_TIMEOUT:-90}"   iperf3 -c "$peer" -u -b "${IPERF_UDP_RATE:-500}" -l "${IPERF_UDP_LEN:-64}"   -t "${IPERF_SECONDS:-5}"; then
   echo
-  echo "iperf3 client/server did not complete."
+  echo "UDP iperf3 did not complete."
   echo "Server log:"
   cat "$iperf_server_log" 2>/dev/null || true
   echo
   echo "Bridge log:"
-  tail -n 80 "$bridge_log" 2>/dev/null || true
+  tail -n 120 "$bridge_log" 2>/dev/null || true
   exit 1
 fi
 
@@ -166,7 +164,33 @@ wait "$iperf_pid" || true
 iperf_pid=""
 
 echo
-echo "iperf3 server:"
+echo "UDP iperf3 server:"
+cat "$iperf_server_log"
+
+echo
+echo "Running small TCP iperf3 transfer ..."
+: >"$iperf_server_log"
+ip netns exec "$namespace" iperf3 -s -1 -B "$peer" >"$iperf_server_log" 2>&1 &
+iperf_pid=$!
+sleep 0.5
+
+if ! timeout "${IPERF_TCP_TIMEOUT:-120}"   iperf3 -c "$peer" -n "${IPERF_TCP_BYTES:-512}" -l "${IPERF_TCP_BLOCK:-64}"   -M "${IPERF_MSS:-128}" -N; then
+  echo
+  echo "TCP iperf3 did not complete."
+  echo "Server log:"
+  cat "$iperf_server_log" 2>/dev/null || true
+  echo
+  echo "Bridge log:"
+  tail -n 120 "$bridge_log" 2>/dev/null || true
+  exit 1
+fi
+
+wait "$iperf_pid" || true
+iperf_pid=""
+
+echo
+echo "TCP iperf3 server:"
 cat "$iperf_server_log"
 echo
-echo "PASS: ping + TCP iperf3 crossed the universal runtime instances and physical LIN."
+echo "PASS: ping + UDP iperf3 + TCP iperf3 crossed the universal runtime instances and physical LIN."
+
