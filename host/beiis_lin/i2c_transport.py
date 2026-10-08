@@ -237,10 +237,29 @@ class I2CBytePipe:
         if self.irq is not None:
             self.irq.drain()
 
+    def calibrate_irq_idle(self)->int|None:
+        if self.irq is None:
+            return None
+        # Allow the isolated hardware level to settle after clearing pending
+        # STM32 host-output state.
+        time.sleep(0.002)
+        return self.irq.calibrate_idle()
+
     def irq_info(self)->dict:
+        current=None
+        active=None
+        if self.irq is not None:
+            try:
+                current=self.irq.value()
+                active=self.irq.active()
+            except OSError:
+                pass
         return {
             "enabled":self.irq is not None,
             "description":self.irq.description if self.irq is not None else None,
+            "idle_value":self.irq.idle_value if self.irq is not None else None,
+            "value":current,
+            "active":active,
             "error":self.irq_error,
         }
 
