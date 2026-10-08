@@ -484,12 +484,30 @@ class IpOverLinBridge:
         return node
 
     def wait_slave_rx(self, timeout: float = 1.0) -> bytes:
+        # Usually the physical frame has completed by the time master.send()
+        # returns, so check once without waiting.
+        data = self.slave.slave_rx_recv()
+        if data is not None:
+            return data
+
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # SLAVE_RX_RECV itself produces an application reply/IRQ. Drain
+            # that completed RPC edge, then re-check before sleeping to close
+            # the race with a native LIN RX completion.
+            self.client.drain_irq()
+
             data = self.slave.slave_rx_recv()
             if data is not None:
                 return data
-            time.sleep(0.001)
+
+            self.client.drain_irq()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+
+            self.client.wait_irq(min(remaining, 0.5))
+
         raise TimeoutError("timeout waiting for slave receive frame")
 
     def master_to_node(self, packet: bytes) -> None:
