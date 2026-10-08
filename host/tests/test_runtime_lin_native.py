@@ -23,6 +23,7 @@ class FakeLin:
         self.calls = []
         self.request_data = b"\x11\x22\x33\x44"
         self.led_mask = 0
+        self.slave_rx_data = None
 
     def init(self, channel, baud):
         self.calls.append(("init", channel, baud))
@@ -39,6 +40,13 @@ class FakeLin:
 
     def slave_clear(self, channel):
         self.calls.append(("slave_clear", channel))
+
+    def slave_rx_set(self, channel, frame_id, length, enhanced):
+        self.calls.append(("slave_rx_set", channel, frame_id, length, enhanced))
+
+    def slave_rx_recv(self, channel):
+        self.calls.append(("slave_rx_recv", channel))
+        return self.slave_rx_data
 
     def leds(self, *args):
         if args:
@@ -108,6 +116,36 @@ class LinNativeProtocolTest(unittest.TestCase):
             bytes((self.app.OP_SLAVE_CLEAR, self.app.STATUS_OK)),
         )
         self.assertEqual(self.lin.calls[-1], ("slave_clear", 2))
+
+
+    def test_slave_rx_set_and_recv(self):
+        request = bytes((self.app.OP_SLAVE_RX_SET, 0x12, 1, 8))
+        reply = self.app.handle_request(self.lin, 2, request)
+        self.assertEqual(
+            reply,
+            bytes((self.app.OP_SLAVE_RX_SET, self.app.STATUS_OK)),
+        )
+        self.assertEqual(
+            self.lin.calls[-1],
+            ("slave_rx_set", 2, 0x12, 8, True),
+        )
+
+        reply = self.app.handle_request(
+            self.lin, 2, bytes((self.app.OP_SLAVE_RX_RECV,))
+        )
+        self.assertEqual(
+            reply,
+            bytes((self.app.OP_SLAVE_RX_RECV, self.app.STATUS_OK, 0)),
+        )
+
+        self.lin.slave_rx_data = b"\x01\x02\x03"
+        reply = self.app.handle_request(
+            self.lin, 2, bytes((self.app.OP_SLAVE_RX_RECV,))
+        )
+        self.assertEqual(
+            reply,
+            bytes((self.app.OP_SLAVE_RX_RECV, self.app.STATUS_OK, 1, 3, 1, 2, 3)),
+        )
 
     def test_leds(self):
         reply = self.app.handle_request(
