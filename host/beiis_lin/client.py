@@ -140,3 +140,10 @@ class DaemonClient:
 
     def runtime_call(self,op:str,args:dict|None=None,timeout:float=2.0):
         return self._call("runtime",{"op":str(op),"args":args or {},"timeout":float(timeout)})
+
+    def wait_irq(self, timeout: float = 1.0) -> bool:
+        result = self._call("wait_irq", {"timeout": float(timeout)})
+        return bool(result.get("event", False))
+
+    def drain_irq(self):
+        return self._call("drain_irq")
