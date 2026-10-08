@@ -178,6 +178,18 @@ class LinHat:
     def irq_info(self)->dict:
         return self.transport.irq_info()
 
+    def prepare_host_irq(self)->dict:
+        if self.transport.irq is None:
+            return self.transport.irq_info()
+
+        # A daemon restart has no clients yet, so stale STM32->host application
+        # frames cannot be consumed meaningfully. Clear only the application
+        # transport FIFOs, leave runtime instances and LIN state untouched,
+        # then sample a guaranteed idle GPIO level.
+        self.transport.app_reset()
+        self.transport.calibrate_irq_idle()
+        return self.transport.irq_info()
+
     def runtime_call(self,op:str,args:dict|None=None,timeout:float=2.0):
         request_id=self._app_request_id
         self._app_request_id+=1
