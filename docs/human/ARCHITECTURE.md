@@ -66,7 +66,7 @@ available, the host transport falls back to the previous polling behaviour.
 
 ## Runtime and recovery path
 
-The STM32 application transport supports up to eight stored MicroPython
+The STM32 application transport supports up to sixteen stored MicroPython
 instances and 32 user channels. Runtime management uses the reserved management
 channel 0xff. Management replies and application frames are framed atomically on
 the STM32-to-host path.
@@ -92,3 +92,9 @@ The normal transport is intentionally local. A remote test host can reach the
 same Unix socket through SSH stream-local forwarding. No separate LAN protocol
 is required for this test, so remote testing exercises the production daemon
 protocol without adding an unauthenticated network service.
+
+
+## Further reading
+
+- `RUNTIME_GUIDE.md` - application/runtime usage and native LIN operations
+- `SOCKET_API.md` - Unix socket protocol for C/Python/other host applications
