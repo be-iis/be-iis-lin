@@ -5,7 +5,7 @@ how the standard runtime is structured, how to control the native LIN engine,
 how to use and extend query instances, and how firmware updates fit into the
 stack.
 
-For the exact Unix-socket JSON protocol, see `SOCKET_API.md`.
+For a compact command/slot cheat sheet, see `QUICK_REFERENCE.md`. For the exact Unix-socket JSON protocol, see `SOCKET_API.md`.
 
 ## 1. Mental model
 
