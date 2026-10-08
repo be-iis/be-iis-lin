@@ -99,8 +99,21 @@ lin_result_t lin_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t
 lin_result_t lin_slave_clear(uint8_t channel) {
     if(!valid_channel(channel)) return LIN_ERR_ARG;
     int r=lin_port_slave_clear(channel);
-    if(r==0) set_slave_enabled(channel,false);
     return r==0?LIN_OK:LIN_ERR_IO;
+}
+
+lin_result_t lin_slave_rx_set(uint8_t channel,uint8_t id,size_t len,lin_checksum_mode_t mode) {
+    if(!valid_channel(channel)||id>0x3f||len>8) return LIN_ERR_ARG;
+    int r=lin_port_slave_rx_set(channel,id,len,mode);
+    if(r==0) set_slave_enabled(channel,true);
+    return r==0?LIN_OK:LIN_ERR_IO;
+}
+
+lin_result_t lin_slave_rx_recv(uint8_t channel,uint8_t *data,size_t cap,size_t *len) {
+    if(!valid_channel(channel)||!data||!len) return LIN_ERR_ARG;
+    int r=lin_port_slave_rx_recv(channel,data,cap,len);
+    if(r<0) return LIN_ERR_IO;
+    return r==0?LIN_ERR_TIMEOUT:LIN_OK;
 }
 
 
