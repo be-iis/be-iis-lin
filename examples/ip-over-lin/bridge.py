@@ -14,6 +14,8 @@ from beiis_lin.socket_protocol import DEFAULT_SOCKET_PATH
 
 
 TUNSETIFF = 0x400454CA
+TUNSETOFFLOAD = 0x400454D0
+TUN_READ_SIZE = 65535
 IFF_TUN = 0x0001
 IFF_NO_PI = 0x1000
 
@@ -258,6 +260,9 @@ class TunInterface:
         ifreq = struct.pack("16sH", self.name.encode(), IFF_TUN | IFF_NO_PI)
         result = fcntl.ioctl(self.fd, TUNSETIFF, ifreq)
         self.name = result[:16].split(b"\0", 1)[0].decode()
+        # Do not allow GSO/TSO/USO packets to reach this userspace link.
+        # The LIN framing layer requires one ordinary IPv4 packet at a time.
+        fcntl.ioctl(self.fd, TUNSETOFFLOAD, 0)
         return self.fd
 
     def open(self) -> int:
@@ -489,6 +494,10 @@ class IpOverLinBridge:
 
     def master_to_node(self, packet: bytes) -> None:
         if len(packet) > self.mtu:
+            print(
+                f"drop master packet: {len(packet)} bytes exceeds MTU {self.mtu}",
+                flush=True,
+            )
             return
 
         node = self.packet_node(packet)
@@ -514,6 +523,10 @@ class IpOverLinBridge:
 
     def node_to_master(self, node: int, packet: bytes) -> None:
         if len(packet) > self.mtu:
+            print(
+                f"drop node packet: {len(packet)} bytes exceeds MTU {self.mtu}",
+                flush=True,
+            )
             return
 
         sequence = self.next_sequence()
@@ -584,7 +597,7 @@ class IpOverLinBridge:
             for key, _ in events:
                 side, node = key.data
                 try:
-                    packet = os.read(key.fd, self.mtu)
+                    packet = os.read(key.fd, TUN_READ_SIZE)
                 except BlockingIOError:
                     continue
                 if not packet:
