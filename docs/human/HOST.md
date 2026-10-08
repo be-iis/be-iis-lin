@@ -38,6 +38,11 @@ beiis-lin lin-slave-clear 2
 Add `--classic` to LIN send/request/slave-set for classic checksum. Enhanced
 checksum is the default.
 
+These `lin-*` CLI operations use Raw REPL / the direct MicroPython `lin`
+module. If the persistent application runtime currently owns the interpreter,
+stop the runtime first. For normal deployed master/slave operation, use the
+query/native/query runtime path documented in `RUNTIME_GUIDE.md`.
+
 If the daemon socket exists the CLI uses it. `--direct` bypasses the daemon
 and accesses I2C directly; this is intended for development and recovery.
 
