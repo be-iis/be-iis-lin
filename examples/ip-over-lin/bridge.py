@@ -19,6 +19,20 @@ IFF_TUN = 0x0001
 IFF_NO_PI = 0x1000
 
 FRAME_SIZE = 8
+
+RPC_PING = 0x00
+RPC_INIT = 0x01
+RPC_SEND = 0x02
+RPC_REQUEST = 0x03
+RPC_SLAVE_SET = 0x04
+RPC_SLAVE_CLEAR = 0x05
+
+MASTER_TX_SLOT = 0
+MASTER_RX_SLOT = 1
+SLAVE_TX_SLOT = 3
+SLAVE_RX_SLOT = 4
+APP_CHANNEL = 0
+
 HEADER_SIZE = 2
 PAYLOAD_SIZE = FRAME_SIZE - HEADER_SIZE
 SEQ_MASK = 0x3F
@@ -182,6 +196,89 @@ def icmp_echo_reply(packet: bytes, node: int) -> bytes | None:
     return bytes(reply)
 
 
+class RuntimeLinClient:
+    def __init__(self, client, tx_slot, rx_slot, app_channel=APP_CHANNEL):
+        self.client = client
+        self.tx_slot = int(tx_slot)
+        self.rx_slot = int(rx_slot)
+        self.app_channel = int(app_channel)
+
+    def call(self, request: bytes, timeout: float = 2.0) -> bytes:
+        request = bytes(request)
+        if not request:
+            raise ValueError("empty runtime LIN request")
+
+        self.client.set_active_instance(self.tx_slot)
+        self.client.data_send(self.app_channel, request)
+        instance, channel, reply = self.client.data_recv(
+            instance=self.rx_slot,
+            channel=self.app_channel,
+            timeout=timeout,
+        )
+
+        if instance != self.rx_slot or channel != self.app_channel:
+            raise RuntimeError("unexpected runtime LIN reply source")
+        if len(reply) < 2:
+            raise RuntimeError("short runtime LIN reply")
+        if reply[0] != request[0]:
+            raise RuntimeError("runtime LIN operation mismatch")
+        if reply[1] != 0:
+            text = reply[2:].decode("utf-8", "replace")
+            raise RuntimeError(
+                f"runtime LIN operation 0x{request[0]:02x} failed "
+                f"status={reply[1]}: {text}"
+            )
+        return bytes(reply[2:])
+
+    def ping(self) -> None:
+        self.call(bytes((RPC_PING,)))
+
+    def init(self, baud: int) -> None:
+        baud = int(baud)
+        self.call(bytes((RPC_INIT,)) + baud.to_bytes(4, "little"))
+
+    def send(self, frame_id: int, data: bytes, enhanced: bool = True) -> None:
+        data = bytes(data)
+        if len(data) > 8:
+            raise ValueError("LIN data > 8 bytes")
+        flags = 1 if enhanced else 0
+        self.call(bytes((RPC_SEND, frame_id & 0x3F, flags, len(data))) + data)
+
+    def request(
+        self,
+        frame_id: int,
+        length: int,
+        enhanced: bool = True,
+        timeout: float = 2.0,
+    ) -> bytes:
+        if length < 0 or length > 8:
+            raise ValueError("LIN request length must be 0..8")
+        flags = 1 if enhanced else 0
+        result = self.call(
+            bytes((RPC_REQUEST, frame_id & 0x3F, flags, length)),
+            timeout=timeout,
+        )
+        if not result:
+            raise RuntimeError("missing LIN request result length")
+        received = result[0]
+        data = result[1:]
+        if received != len(data):
+            raise RuntimeError("invalid LIN request result length")
+        return data
+
+    def slave_set(self, frame_id: int, data: bytes, enhanced: bool = True) -> None:
+        data = bytes(data)
+        if len(data) > 8:
+            raise ValueError("LIN data > 8 bytes")
+        flags = 1 if enhanced else 0
+        self.call(
+            bytes((RPC_SLAVE_SET, frame_id & 0x3F, flags, len(data))) + data
+        )
+
+    def slave_clear(self) -> None:
+        self.call(bytes((RPC_SLAVE_CLEAR,)))
+
+
 class TunInterface:
     def __init__(self, name: str, address: str, mtu: int):
         self.name = name
@@ -248,6 +345,12 @@ class IpOverLinBridge:
         self.network = interface.network
 
         self.client = DaemonClient(socket_path)
+        self.master = RuntimeLinClient(
+            self.client, MASTER_TX_SLOT, MASTER_RX_SLOT, APP_CHANNEL
+        )
+        self.slave = RuntimeLinClient(
+            self.client, SLAVE_TX_SLOT, SLAVE_RX_SLOT, APP_CHANNEL
+        )
         self.tun = TunInterface(ifname, address, mtu)
         self.selector = selectors.DefaultSelector()
         self.sequence = 1
@@ -261,17 +364,44 @@ class IpOverLinBridge:
         self.client.close()
 
     def prepare_backend(self) -> None:
-        # The current LIN socket API is implemented through Raw REPL.
-        # Stop any autostart runtime before taking ownership of LIN.
-        try:
-            self.client.runtime_call("runtime_stop", timeout=1.0)
-            time.sleep(0.1)
-        except Exception:
-            pass
+        info = self.client.runtime_call("info", timeout=2.0)
+        expected = {
+            "master_tx_query": MASTER_TX_SLOT,
+            "master_rx_query": MASTER_RX_SLOT,
+            "slave_tx_query": SLAVE_TX_SLOT,
+            "slave_rx_query": SLAVE_RX_SLOT,
+        }
+        found = {
+            item.get("name"): item
+            for item in (info.get("instances") or [])
+        }
 
-        self.client.lin_init(self.channel, self.baud)
+        for name, slot in expected.items():
+            item = found.get(name)
+            if item is None:
+                raise RuntimeError(
+                    f"missing runtime instance {name}; "
+                    "run scripts/install-standard-runtime.py first"
+                )
+            if int(item.get("slot", -1)) != slot:
+                raise RuntimeError(
+                    f"runtime instance {name} is in slot {item.get('slot')}, "
+                    f"expected {slot}"
+                )
+            if item.get("state") != "running":
+                raise RuntimeError(
+                    f"runtime instance {name} is not running: {item.get('state')}"
+                )
+
+        self.master.ping()
+        self.master.init(self.baud)
+
         if self.wire_loopback:
-            self.client.lin_init(self.loopback_slave_channel, self.baud)
+            slave_native = found.get("slave_native")
+            if slave_native is None or slave_native.get("state") != "running":
+                raise RuntimeError("slave_native is not running")
+            self.slave.ping()
+            self.slave.init(self.baud)
 
     def next_sequence(self) -> int:
         value = self.sequence
@@ -303,7 +433,7 @@ class IpOverLinBridge:
 
         sequence = self.next_sequence()
         for frame in fragment_packet(packet, sequence):
-            self.client.lin_send(self.channel, node, frame, enhanced=True)
+            self.master.send(node, frame, enhanced=True)
 
         if self.wire_loopback:
             reply = icmp_echo_reply(packet, node)
@@ -319,14 +449,8 @@ class IpOverLinBridge:
 
         while queue:
             frame = queue.popleft()
-            self.client.lin_slave_set(
-                self.loopback_slave_channel,
-                node,
-                frame,
-                enhanced=True,
-            )
-            received = self.client.lin_request(
-                self.channel,
+            self.slave.slave_set(node, frame, enhanced=True)
+            received = self.master.request(
                 node,
                 FRAME_SIZE,
                 enhanced=True,
@@ -335,15 +459,14 @@ class IpOverLinBridge:
             if packet is not None:
                 os.write(self.tun.fd, packet)
 
-        self.client.lin_slave_clear(self.loopback_slave_channel)
+        self.slave.slave_clear()
 
     def poll_node(self, node: int) -> None:
         if self.wire_loopback:
             return
 
         try:
-            frame = self.client.lin_request(
-                self.channel,
+            frame = self.master.request(
                 node,
                 FRAME_SIZE,
                 enhanced=True,
