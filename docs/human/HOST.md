@@ -118,3 +118,12 @@ To force the compatibility polling path:
 If GPIO acquisition fails, the normal daemon continues with polling and reports
 the reason in its `info` reply. Hardware performance tests require the IRQ to
 be active so a polling run cannot be mistaken for an interrupt-driven result.
+
+
+## Application integration guides
+
+For the normal persistent runtime and master/slave/query examples, see
+`RUNTIME_GUIDE.md`.
+
+For applications that implement the Unix socket protocol directly, including C,
+see `SOCKET_API.md` and `../../examples/runtime/`.
