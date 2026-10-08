@@ -169,3 +169,22 @@ new module is activated.
 
 `runtime_stop` stops all instances and returns control to normal MicroPython
 boot/REPL flow without changing the stored configuration.
+
+
+## Host notification IRQ
+
+The STM32 board provides an isolated host-notification signal on PC6, connected
+to Raspberry Pi GPIO6.
+
+For the application transport, PC6 is asserted while the STM32 -> host
+application FIFO is non-empty and deasserted after the host consumes the pending
+data. The board combines this with other host-visible readiness sources, so one
+source cannot clear an interrupt while another source remains pending.
+
+`beiis-lind` uses GPIO6 events to sleep between I2C reads instead of polling
+`APP_TX_COUNT` every millisecond. The I2C status/count register remains the
+source of truth after wakeup, so missed/spurious GPIO edges do not change the
+framing protocol.
+
+If GPIO event access is unavailable, the host may fall back to polling without
+changing the I2C protocol.
