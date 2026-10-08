@@ -29,6 +29,13 @@ Verified on real hardware:
 - native APP_CONTROL recovery: STM32 reset and direct mboot entry
 - all eight LIN status/activity LEDs and GPIO self-test
 - STM32 PC6 -> isolation -> Pi GPIO6 IRQ hardware path
+- GPIO6-driven host wakeup in beiis-lind using Linux GPIO character ABI v2
+- level-based PC6 host IRQ for application TX data and native LIN slave RX
+- generic interrupt-driven slave receive of master-published LIN frames
+- real second Linux IPv4 endpoint in a network namespace
+- real IPv4 ICMP through Linux -> runtime -> LIN1 -> LIN2 -> runtime -> Linux
+- UDP iperf3 through the physical LIN bus: 5 x 64-byte datagrams, 0% loss
+- TCP iperf3 through the physical LIN bus: 512 bytes end-to-end
 
 Not yet fully verified/implemented:
 
@@ -61,13 +68,6 @@ Verified on real hardware:
 
 Prepared, not yet hardware verified:
 
-- GPIO6-driven host wakeup in beiis-lind using Linux GPIO character ABI v2
-- level-based PC6 host IRQ for application TX data and native LIN slave RX
-- generic interrupt-driven slave receive of master-published LIN frames
-- separate downlink/uplink frame identifiers per logical node
-- real second Linux IPv4 endpoint in a network namespace
-- real ICMP handled by the second Linux network stack
-- TCP iperf3 server/client through the physical LIN bus
 
 The network experiment remains isolated under examples/ip-over-lin. The STM32
 and MicroPython runtime contain only generic LIN functionality.
