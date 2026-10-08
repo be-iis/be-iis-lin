@@ -98,6 +98,7 @@ Run the Linux socket daemon manually when needed:
 
 Start here:
 
+- `docs/human/QUICK_REFERENCE.md` - compact slot/command/example cheat sheet
 - `docs/human/RUNTIME_GUIDE.md` - native LIN control, master/slave paths,
   queries, custom workers, logging, flashing, C and Python integration
 - `docs/human/SOCKET_API.md` - exact Unix `SOCK_SEQPACKET` JSON API
