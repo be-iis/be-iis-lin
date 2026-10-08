@@ -292,7 +292,7 @@ class HostGpioIrq:
             return False
 
         self.drain()
-        return self.active() or True
+        return True
 
     def drain(self) -> None:
         if not self.available:
