@@ -90,3 +90,31 @@ TCP-to-Unix bridge.
 For LAN testing, use the SSH stream-local forwarding procedure in
 `LAN_TEST.md`. This preserves the same daemon/socket protocol while SSH
 provides transport security and host authentication.
+
+
+## Host IRQ
+
+On Raspberry Pi hardware, `beiis-lind` uses GPIO6 by default as the isolated
+STM32 host-notification input.
+
+The daemon accesses the GPIO directly through Linux GPIO character ABI v2 and
+does not require a Python `gpiod` package.
+
+Default:
+
+```sh
+.venv/bin/beiis-lind --irq-gpio 6
+```
+
+An explicit GPIO chip name/path may be supplied with `--irq-chip`. The daemon
+automatically prefers RP1/pinctrl GPIO chips when no chip is specified.
+
+To force the compatibility polling path:
+
+```sh
+.venv/bin/beiis-lind --no-irq
+```
+
+If GPIO acquisition fails, the normal daemon continues with polling and reports
+the reason in its `info` reply. Hardware performance tests require the IRQ to
+be active so a polling run cannot be mistaken for an interrupt-driven result.
