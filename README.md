@@ -47,8 +47,7 @@ The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
 - bidirectional LIN1/LIN2 master/slave operation verified with classic and enhanced checksums
 - Unix SOCK_SEQPACKET daemon path verified end-to-end on hardware
 - runtime management, application data, LIN and mboot/recovery verified through beiis-lind
-- tested IRQ hardware path: STM32 PC6 -> isolated IRQ -> Raspberry Pi GPIO6
-- IRQ-driven daemon events are not integrated yet
+- tested IRQ-driven host path: STM32 PC6 -> isolated IRQ -> Raspberry Pi GPIO6 -> beiis-lind
 - beiis-lind currently exposes a local Unix socket only; no direct TCP listener
 
 ## Repository layout
@@ -95,9 +94,22 @@ Run the Linux socket daemon manually when needed:
 .venv/bin/beiis-lind
 ```
 
-See `docs/human/` for build, flashing, host and LIN API details. For remote
-testing over a LAN, see `docs/human/LAN_TEST.md`; the documented test uses SSH
-Unix-socket forwarding and does not expose the daemon directly on TCP.
+## Documentation
+
+Start here:
+
+- `docs/human/RUNTIME_GUIDE.md` - native LIN control, master/slave paths,
+  queries, custom workers, logging, flashing, C and Python integration
+- `docs/human/SOCKET_API.md` - exact Unix `SOCK_SEQPACKET` JSON API
+- `docs/human/HOST.md` - daemon, CLI, ownership and GPIO IRQ
+- `docs/human/FLASHING.md` - SWD and I2C/mboot firmware updates
+- `protocol/APP-RUNTIME.md` - STM32 runtime transport and instance model
+- `examples/runtime/` - executable Python, C and custom-query examples
+- `examples/ip-over-lin/` - isolated IP-over-LIN experiment
+
+For remote testing over a LAN, see `docs/human/LAN_TEST.md`; the documented
+test uses SSH Unix-socket forwarding and does not expose the daemon directly on
+TCP.
 
 ## License and attribution
 
