@@ -88,11 +88,21 @@ class _GpioV2LineEvent(ctypes.Structure):
     ]
 
 
+class _GpioV2LineValues(ctypes.Structure):
+    _fields_ = [
+        ("bits", ctypes.c_uint64),
+        ("mask", ctypes.c_uint64),
+    ]
+
+
 GPIO_GET_CHIPINFO_IOCTL = _ioc(
     2, 0xB4, 0x01, ctypes.sizeof(_GpioChipInfo)
 )
 GPIO_V2_GET_LINE_IOCTL = _ioc(
     3, 0xB4, 0x07, ctypes.sizeof(_GpioV2LineRequest)
+)
+GPIO_V2_LINE_GET_VALUES_IOCTL = _ioc(
+    3, 0xB4, 0x0E, ctypes.sizeof(_GpioV2LineValues)
 )
 
 
@@ -170,6 +180,7 @@ class HostGpioIrq:
         self.chip_label = ""
         self._chip_fd = -1
         self._line_fd = -1
+        self._idle_value = None
 
         candidates = gpio_chips()
         if chip is not None:
@@ -241,10 +252,34 @@ class HostGpioIrq:
         self.chip_name = chip.name
         self.chip_label = chip.label
         self.drain()
+        self._idle_value = self.value()
+
+    def value(self) -> int:
+        if not self.available:
+            raise OSError("GPIO IRQ line is not available")
+        values = _GpioV2LineValues()
+        values.mask = 1
+        _ioctl_struct(
+            self._line_fd,
+            GPIO_V2_LINE_GET_VALUES_IOCTL,
+            values,
+        )
+        return 1 if (values.bits & 1) else 0
+
+    def active(self) -> bool:
+        if not self.available or self._idle_value is None:
+            return False
+        return self.value() != self._idle_value
 
     def wait(self, timeout: float | None = None) -> bool:
         if not self.available:
             return False
+
+        # PC6 is level-based. If another IRQ source already holds the shared
+        # line active, there may be no fresh edge for a newly-ready source.
+        # Always inspect the current level before sleeping for an edge.
+        if self.active():
+            return True
 
         poller = select.poll()
         poller.register(
@@ -257,7 +292,7 @@ class HostGpioIrq:
             return False
 
         self.drain()
-        return True
+        return self.active() or True
 
     def drain(self) -> None:
         if not self.available:
@@ -279,3 +314,4 @@ class HostGpioIrq:
         if self._chip_fd >= 0:
             os.close(self._chip_fd)
             self._chip_fd = -1
+        self._idle_value = None
