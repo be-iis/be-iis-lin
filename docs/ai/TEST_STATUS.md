@@ -47,7 +47,6 @@ Not yet fully verified/implemented:
 - LIN diagnostic transport layer
 - daemon use of GPIO6 IRQ for asynchronous events
 
-
 ## Universal runtime instance path
 
 Verified on real hardware:
@@ -57,9 +56,17 @@ Verified on real hardware:
 - master runtime path: master_tx_query -> master_native -> master_rx_query
 - slave runtime path: slave_tx_query -> slave_native -> slave_rx_query
 - bidirectional physical LIN traffic through the universal runtime instances
-- IP-over-LIN experiment uses the normal Unix socket and universal runtime instances
-- 3/3 ICMP echo replies through lin0 with 0% packet loss
-- measured loopback RTT in the runtime-instance IP experiment: about 0.86 to 0.91 s
+- earlier IP-over-LIN loopback through the runtime instances: 3/3 ICMP replies,
+  0% packet loss; that test synthesized the ICMP reply in Linux and returned
+  its fragments over the physical LIN2 -> LIN1 response path
 
-The IP experiment remains isolated under examples/ip-over-lin. No IP-specific
-code is required in the STM32 or MicroPython runtime.
+Prepared, not yet hardware verified:
+
+- generic interrupt-driven slave receive of master-published LIN frames
+- separate downlink/uplink frame identifiers per logical node
+- real second Linux IPv4 endpoint in a network namespace
+- real ICMP handled by the second Linux network stack
+- TCP iperf3 server/client through the physical LIN bus
+
+The network experiment remains isolated under examples/ip-over-lin. The STM32
+and MicroPython runtime contain only generic LIN functionality.
