@@ -46,3 +46,20 @@ Not yet fully verified/implemented:
 - sleep/wakeup
 - LIN diagnostic transport layer
 - daemon use of GPIO6 IRQ for asynchronous events
+
+
+## Universal runtime instance path
+
+Verified on real hardware:
+
+- 16-slot MicroPython runtime firmware
+- standard 9-instance layout autostarts cleanly with no instance errors
+- master runtime path: master_tx_query -> master_native -> master_rx_query
+- slave runtime path: slave_tx_query -> slave_native -> slave_rx_query
+- bidirectional physical LIN traffic through the universal runtime instances
+- IP-over-LIN experiment uses the normal Unix socket and universal runtime instances
+- 3/3 ICMP echo replies through lin0 with 0% packet loss
+- measured loopback RTT in the runtime-instance IP experiment: about 0.86 to 0.91 s
+
+The IP experiment remains isolated under examples/ip-over-lin. No IP-specific
+code is required in the STM32 or MicroPython runtime.
