@@ -252,7 +252,7 @@ class HostGpioIrq:
         self.chip_name = chip.name
         self.chip_label = chip.label
         self.drain()
-        self._idle_value = self.value()
+        self._idle_value = None
 
     def value(self) -> int:
         if not self.available:
@@ -265,6 +265,17 @@ class HostGpioIrq:
             values,
         )
         return 1 if (values.bits & 1) else 0
+
+    def calibrate_idle(self) -> int:
+        if not self.available:
+            raise OSError("GPIO IRQ line is not available")
+        self.drain()
+        self._idle_value = self.value()
+        return self._idle_value
+
+    @property
+    def idle_value(self) -> int | None:
+        return self._idle_value
 
     def active(self) -> bool:
         if not self.available or self._idle_value is None:
