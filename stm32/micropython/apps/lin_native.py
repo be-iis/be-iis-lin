@@ -21,6 +21,8 @@ BEIIS_API = 1
 #   0x05 SLAVE_CLEAR
 #   0x06 LEDS_GET
 #   0x07 LEDS_SET      mask:u8
+#   0x08 SLAVE_RX_SET  id:u8 flags:u8 len:u8
+#   0x09 SLAVE_RX_RECV
 #
 # flags bit0: enhanced checksum (1); classic checksum (0)
 
@@ -32,6 +34,8 @@ OP_SLAVE_SET = 0x04
 OP_SLAVE_CLEAR = 0x05
 OP_LEDS_GET = 0x06
 OP_LEDS_SET = 0x07
+OP_SLAVE_RX_SET = 0x08
+OP_SLAVE_RX_RECV = 0x09
 
 STATUS_OK = 0
 STATUS_BAD_REQUEST = 1
@@ -129,6 +133,26 @@ def handle_request(lin, channel, payload):
             if len(payload) != 2:
                 raise ValueError("LEDS_SET length")
             return _reply(op, STATUS_OK, bytes((lin.leds(payload[1]),)))
+
+        if op == OP_SLAVE_RX_SET:
+            if len(payload) != 4:
+                raise ValueError("SLAVE_RX_SET length")
+            frame_id = payload[1]
+            enhanced = bool(payload[2] & 0x01)
+            length = payload[3]
+            if length > 8:
+                raise ValueError("SLAVE_RX_SET data length")
+            lin.slave_rx_set(channel, frame_id, length, enhanced)
+            return _reply(op)
+
+        if op == OP_SLAVE_RX_RECV:
+            if len(payload) != 1:
+                raise ValueError("SLAVE_RX_RECV length")
+            data = lin.slave_rx_recv(channel)
+            if data is None:
+                return _reply(op, STATUS_OK, b"\x00")
+            data = bytes(data)
+            return _reply(op, STATUS_OK, b"\x01" + bytes((len(data),)) + data)
 
         raise ValueError("unknown operation")
 
