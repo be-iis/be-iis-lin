@@ -32,4 +32,16 @@ redirected by the BE-IIS user module to the I2C Raw-REPL byte pipe.
 The I2C target address is fixed for the initial bring-up. Dynamic HAT++ variant
 address selection is intentionally deferred.
 
+The isolated PC6 IRQ is a level-based host notification. It is asserted on
+the STM32 side while at least one host-visible source is pending. Current
+sources are:
+
+- STM32 -> host application FIFO contains data,
+- LIN1 slave receive frame is complete and not yet consumed,
+- LIN2 slave receive frame is complete and not yet consumed.
+
+Sources are combined, so consuming one source does not deassert PC6 while
+another source is still pending. Linux listens for both GPIO6 edges; therefore
+the polarity of the isolation stage does not affect wakeup handling.
+
 All eight LIN LEDs are active-low. The slave LED stays on while a slave response is configured. The master LED is on during a master transaction. TX/RX LEDs indicate transmit/receive activity.
