@@ -227,6 +227,8 @@ class LinHatDaemon:
             irq_gpio=self.irq_gpio,
             irq_chip=self.irq_chip,
         )
+        if self.device.transport.irq is not None:
+            self.device.prepare_host_irq()
         self.service = LinHatService(self.device)
         self._prepare_socket()
 
