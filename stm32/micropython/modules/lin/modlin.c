@@ -74,7 +74,35 @@ static mp_obj_t mod_lin_slave_clear(mp_obj_t channel_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_slave_clear_obj,mod_lin_slave_clear);
 
+
+static mp_obj_t mod_lin_tic(void) {
+    return mp_obj_new_int_from_ull(lin_port_tic_now());
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(mod_lin_tic_obj, mod_lin_tic);
+
+static mp_obj_t frame_to_dict(const lin_frame_t *f) {
+    mp_obj_t d = mp_obj_new_dict(5);
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_id), mp_obj_new_int(f->id));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_data), mp_obj_new_bytes(f->data, f->len));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_len), mp_obj_new_int(f->len));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_tic_start), mp_obj_new_int_from_ull(f->tic_start));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_tic_duration), mp_obj_new_int_from_uint(f->tic_duration));
+    return d;
+}
+
+// Return the oldest completed LIN frame (TX, request, or slave reply).
+static mp_obj_t mod_lin_recv(mp_obj_t channel_obj) {
+    uint8_t channel = (uint8_t)mp_obj_get_int(channel_obj);
+    if (channel < 1 || channel > 2) mp_raise_ValueError(MP_ERROR_TEXT("LIN channel must be 1 or 2"));
+    lin_frame_t f;
+    if (!lin_port_frame_pop(channel, &f)) return mp_const_none;
+    return frame_to_dict(&f);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_recv_obj, mod_lin_recv);
+
 static const mp_rom_map_elem_t globals_table[]={
+    {MP_ROM_QSTR(MP_QSTR_tic),MP_ROM_PTR(&mod_lin_tic_obj)},
+    {MP_ROM_QSTR(MP_QSTR_recv),MP_ROM_PTR(&mod_lin_recv_obj)},
     {MP_ROM_QSTR(MP_QSTR___name__),MP_ROM_QSTR(MP_QSTR_lin)},
     {MP_ROM_QSTR(MP_QSTR_init),MP_ROM_PTR(&mod_lin_init_obj)},
     {MP_ROM_QSTR(MP_QSTR_send),MP_ROM_PTR(&mod_lin_send_obj)},
