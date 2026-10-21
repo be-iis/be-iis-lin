@@ -169,6 +169,7 @@ typedef enum {
     LIN_SLAVE_WAIT_PID,
     LIN_SLAVE_TX,
     LIN_SLAVE_WAIT_TC,
+    LIN_SNIFFER_RX,
 } lin_slave_state_t;
 
 typedef struct {
@@ -182,9 +183,38 @@ typedef struct {
     volatile uint8_t tx_len;
     volatile uint8_t tx_pos;
     uint64_t tic_start;
+    volatile bool sniffer_enabled;
+    uint8_t sniffer_len;
+    uint8_t sniffer_pos;
+    uint8_t sniffer_pid;
+    uint8_t sniffer_data[9];
+    lin_checksum_mode_t sniffer_checksum;
 } lin_slave_ctx_t;
 
+typedef struct {
+    bool enabled;
+    uint8_t len;
+    uint8_t data[8];
+    lin_checksum_mode_t checksum_mode;
+} lin_slave_entry_t;
+typedef struct {
+    bool enabled;
+    uint8_t len;
+    lin_checksum_mode_t checksum_mode;
+} lin_sniffer_entry_t;
+static lin_slave_entry_t slave_entries[2][64];
+static lin_sniffer_entry_t sniffer_entries[2][64];
 static lin_slave_ctx_t lin_slave[2];
+
+static bool has_slaves(unsigned i) {
+    for (unsigned id=0; id<64; ++id) if (slave_entries[i][id].enabled) return true;
+    return false;
+}
+bool lin_port_master_allowed(uint8_t channel) {
+    if (channel<1 || channel>2) return false;
+    unsigned i=channel-1;
+    return !lin_slave[i].sniffer_enabled && !has_slaves(i);
+}
 
 static volatile uint8_t i2c_reg;
 static volatile uint8_t i2c_expect_reg = 1;
@@ -431,49 +461,93 @@ static lin_slave_ctx_t *lin_slave_ctx(uint8_t channel) {
     return &lin_slave[channel - 1];
 }
 
-int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode) {
+
+static void lin_listen_mode(uint8_t channel, bool enable) {
     UART_HandleTypeDef *h = lin_handle(channel);
-    lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
-    if (!h || !ctx || !data || len > 8 || id > 0x3f || h->gState == HAL_UART_STATE_RESET) return -1;
-
-    uint32_t primask = __get_PRIMASK();
-    __disable_irq();
-
-    ctx->id = id;
-    ctx->len = (uint8_t)len;
-    memcpy(ctx->data, data, len);
-    ctx->checksum_mode = mode;
-    ctx->tx_len = 0;
-    ctx->tx_pos = 0;
-    ctx->state = LIN_SLAVE_WAIT_BREAK;
-    ctx->enabled = true;
-
-    USART_TypeDef *u = h->Instance;
-    u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
-    u->CR2 |= USART_CR2_LBDIE;
+    if (!h || h->gState == HAL_UART_STATE_RESET) return;
+    USART_TypeDef *u=h->Instance;
     u->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
-    u->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
-
-    IRQn_Type irqn = channel == 1 ? USART1_IRQn : USART2_IRQn;
-    NVIC_SetPriority(irqn, IRQ_PRI_UART);
-    NVIC_EnableIRQ(irqn);
-
-    if (!primask) __enable_irq();
+    if (enable) {
+        u->ICR=USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_TCCF;
+        u->CR2 |= USART_CR2_LBDIE;
+        u->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+        IRQn_Type irq=channel==1 ? USART1_IRQn : USART2_IRQn;
+        NVIC_SetPriority(irq, IRQ_PRI_UART);
+        NVIC_EnableIRQ(irq);
+    } else {
+        u->CR2 &= ~USART_CR2_LBDIE;
+        u->CR1 &= ~USART_CR1_RXNEIE_RXFNEIE;
+    }
+}
+int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode) {
+    UART_HandleTypeDef *h=lin_handle(channel);
+    if(channel<1||channel>2||id>63||len>8||!data||!h||h->gState==HAL_UART_STATE_RESET) return -1;
+    unsigned i=channel-1;
+    uint32_t key=__get_PRIMASK(); __disable_irq();
+    if (lin_slave[i].sniffer_enabled) { if(!key)__enable_irq(); return -2; }
+    lin_slave_entry_t *e=&slave_entries[i][id];
+    e->enabled=false;
+    e->len=(uint8_t)len;
+    memcpy(e->data,data,len);
+    e->checksum_mode=mode;
+    e->enabled=true;
+    lin_slave[i].enabled=true;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,true);
+    lin_port_led_slave(channel,true);
+    if(!key)__enable_irq();
     return 0;
 }
-
+int lin_port_slave_remove(uint8_t channel,uint8_t id) {
+    if(channel<1||channel>2||id>63) return -1;
+    uint32_t key=__get_PRIMASK(); __disable_irq();
+    unsigned i=channel-1;
+    slave_entries[i][id].enabled=false;
+    bool active=has_slaves(i);
+    lin_slave[i].enabled=active;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,active);
+    lin_port_led_slave(channel,active);
+    if(!key)__enable_irq();
+    return 0;
+}
 int lin_port_slave_clear(uint8_t channel) {
-    UART_HandleTypeDef *h = lin_handle(channel);
-    lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
-    if (!h || !ctx) return -1;
-
-    ctx->enabled = false;
-    ctx->state = LIN_SLAVE_WAIT_BREAK;
-    ctx->tx_len = 0;
-    ctx->tx_pos = 0;
-
-    h->Instance->CR2 &= ~USART_CR2_LBDIE;
-    h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
+    if(channel<1||channel>2) return -1;
+    uint32_t key=__get_PRIMASK(); __disable_irq();
+    unsigned i=channel-1;
+    memset(slave_entries[i],0,sizeof(slave_entries[i]));
+    lin_slave[i].enabled=false;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,false);
+    lin_port_led_slave(channel,false);
+    if(!key)__enable_irq();
+    return 0;
+}
+int lin_port_sniffer_set(uint8_t channel,uint8_t id,uint8_t len,lin_checksum_mode_t mode) {
+    if(channel<1||channel>2||id>63||len>8) return -1;
+    uint32_t key=__get_PRIMASK();__disable_irq();
+    lin_sniffer_entry_t *e=&sniffer_entries[channel-1][id];
+    e->len=len; e->checksum_mode=mode; e->enabled=true;
+    if(!key)__enable_irq();
+    return 0;
+}
+int lin_port_sniffer_clear(uint8_t channel) {
+    if(channel<1||channel>2) return -1;
+    uint32_t key=__get_PRIMASK();__disable_irq();
+    memset(sniffer_entries[channel-1],0,sizeof(sniffer_entries[0]));
+    if(!key)__enable_irq();
+    return 0;
+}
+int lin_port_sniffer_enable(uint8_t channel,bool enable) {
+    UART_HandleTypeDef *h=lin_handle(channel);
+    if(channel<1||channel>2||!h||h->gState==HAL_UART_STATE_RESET) return -1;
+    unsigned i=channel-1;
+    uint32_t key=__get_PRIMASK();__disable_irq();
+    if(enable && has_slaves(i)) {if(!key)__enable_irq();return -2;}
+    lin_slave[i].sniffer_enabled=enable;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,enable);
+    if(!key)__enable_irq();
     return 0;
 }
 
@@ -485,7 +559,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
     USART_TypeDef *u = h->Instance;
     uint32_t isr = u->ISR;
 
-    if (!ctx->enabled) {
+    if (!ctx->enabled && !ctx->sniffer_enabled) {
         // A stale TC/TXE interrupt must not keep the CPU in an IRQ storm.
         // Master transactions use blocking HAL UART operations and do not
         // expect our slave IRQ handler to service TX interrupts.
@@ -525,7 +599,21 @@ void beiis_lin_uart_irq(uint8_t channel) {
         if (ctx->state == LIN_SLAVE_WAIT_SYNC) {
             ctx->state = (v == 0x55) ? LIN_SLAVE_WAIT_PID : LIN_SLAVE_WAIT_BREAK;
         } else if (ctx->state == LIN_SLAVE_WAIT_PID) {
-            if (lin_pid_valid(v) && ((v & 0x3f) == ctx->id)) {
+            uint8_t id=v & 0x3f;
+            if (lin_pid_valid(v) && ctx->sniffer_enabled && sniffer_entries[channel-1][id].enabled) {
+                lin_sniffer_entry_t *entry=&sniffer_entries[channel-1][id];
+                ctx->id=id;
+                ctx->sniffer_pid=v;
+                ctx->sniffer_len=entry->len;
+                ctx->sniffer_checksum=entry->checksum_mode;
+                ctx->sniffer_pos=0;
+                ctx->state=LIN_SNIFFER_RX;
+            } else if (lin_pid_valid(v) && !ctx->sniffer_enabled && slave_entries[channel-1][id].enabled) {
+                lin_slave_entry_t *entry=&slave_entries[channel-1][id];
+                ctx->id=id;
+                ctx->len=entry->len;
+                memcpy(ctx->data,entry->data,ctx->len);
+                ctx->checksum_mode=entry->checksum_mode;
                 memcpy(ctx->tx, ctx->data, ctx->len);
                 ctx->tx[ctx->len] = lin_checksum(v, ctx->data, ctx->len, ctx->checksum_mode);
                 ctx->tx_len = ctx->len + 1;
@@ -539,6 +627,22 @@ void beiis_lin_uart_irq(uint8_t channel) {
                 u->CR1 |= USART_CR1_TXEIE_TXFNFIE;
             } else {
                 ctx->state = LIN_SLAVE_WAIT_BREAK;
+            }
+        } else if (ctx->state == LIN_SNIFFER_RX) {
+            if (ctx->sniffer_pos < (uint8_t)(ctx->sniffer_len+1)) {
+                ctx->sniffer_data[ctx->sniffer_pos++]=v;
+            }
+            if (ctx->sniffer_pos == (uint8_t)(ctx->sniffer_len+1)) {
+                lin_frame_t frame={0};
+                frame.id=ctx->id;
+                frame.len=ctx->sniffer_len;
+                memcpy(frame.data,ctx->sniffer_data,frame.len);
+                uint8_t expected=lin_checksum(ctx->sniffer_pid,frame.data,frame.len,ctx->sniffer_checksum);
+                frame.status=(ctx->sniffer_data[frame.len]==expected) ? 0 : 1;
+                frame.tic_start=ctx->tic_start;
+                frame.tic_duration=(uint32_t)(lin_port_tic_now()-frame.tic_start);
+                lin_port_frame_push(channel,&frame);
+                ctx->state=LIN_SLAVE_WAIT_BREAK;
             }
         }
     }
