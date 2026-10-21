@@ -1,6 +1,6 @@
 # BE-IIS LIN HAT — MicroPython and firmware reference
 
-**Firmware branch:** `feature/lin-tic-timestamps`. Features described here were hardware-tested in the discussion on Raspberry Pi 5 with LIN1 and LIN2 connected, but have not been merged into `main`.
+**Firmware:** The LIN implementation is maintained on `main`. Key functions have been tested on a Raspberry Pi 5 with LIN1 and LIN2 connected.
 
 The STM32G0B0 runs MicroPython 1.27.0 and a native C LIN engine. Each channel has its own UART, mode, configuration table, and completed-frame FIFO. Both channels share a 1 MHz monotonic TIC counter.
 
@@ -9,7 +9,7 @@ The STM32G0B0 runs MicroPython 1.27.0 and a native C LIN engine. Each channel ha
 ```bash
 git clone https://github.com/be-iis/be-iis-lin.git
 cd be-iis-lin
-git switch feature/lin-tic-timestamps
+git switch main
 bash scripts/prepare.sh
 make host
 make firmware-all
@@ -146,7 +146,7 @@ The firmware consists of a **32 KiB mboot at 0x08000000** and an **application b
 
 ```bash
 cd ~/be-iis-lin
-git switch feature/lin-tic-timestamps
+git switch main
 git pull --ff-only
 make host
 make firmware-all
@@ -172,4 +172,4 @@ Verify the HEX address range before flashing. Power-cycle the board if it remain
 
 ## Hardware and limitations
 
-MCU STM32G0B0KET6; LIN1 USART1 PB6/PB7, LIN2 USART2 PA2/PA3; Raspberry Pi I²C1 at 0x42. A working LIN bus needs appropriate bus power, pull-up, and common reference; connecting two test LIN terminals is appropriate only with matching hardware setup. Slave response tables, monitor rules, and FIFO data are volatile. LIN diagnostic transport, scheduler, sleep/wakeup, and passive capture of arbitrary unknown-length IDs are not provided. Feature branch is subject to further regression testing before merge.
+MCU STM32G0B0KET6; LIN1 USART1 PB6/PB7, LIN2 USART2 PA2/PA3; Raspberry Pi I²C1 at 0x42. A working LIN bus needs appropriate bus power, pull-up, and common reference; connecting two test LIN terminals is appropriate only with matching hardware setup. Slave response tables, monitor rules, and FIFO data are volatile. LIN diagnostic transport, scheduler, sleep/wakeup, and passive capture of arbitrary unknown-length IDs are not provided. Additional regression testing is recommended for production deployment.
