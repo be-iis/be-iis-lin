@@ -747,3 +747,24 @@ elif "G0 flash doublewords carry ECC" not in _ms:
 
 mp.write_text(_ms)
 print("ports/stm32/mboot/main.c: STM32G0B0 one-shot MARKVALID patched")
+
+
+# Reserve TIM6 for the monotonic 1 MHz LIN TIC on STM32G0B0.
+# Upstream MicroPython uses a different combined TIM6 interrupt name on G0B1.
+replace_once(
+    "ports/stm32/stm32_it.c",
+    """#if defined(TIM6) // STM32F401 doesn't have TIM6
+#if defined(STM32G0)
+void TIM6_DAC_LPTIM1_IRQHandler(void) {""",
+    """#if defined(TIM6) // STM32F401 doesn't have TIM6
+#if defined(STM32G0B0xx) && defined(BEIIS_LIN_MODULE_ENABLED)
+void TIM6_IRQHandler(void) {
+    IRQ_ENTER(TIM6_IRQn);
+    extern void beiis_lin_tim6_irq(void);
+    beiis_lin_tim6_irq();
+    IRQ_EXIT(TIM6_IRQn);
+}
+#elif defined(STM32G0)
+void TIM6_DAC_LPTIM1_IRQHandler(void) {""",
+    "beiis_lin_tim6_irq();"
+)
