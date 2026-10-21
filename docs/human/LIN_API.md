@@ -93,3 +93,50 @@ TIM6 periodically turns them off (actual on-time may be up to ~116 ms).
 
 LEDs are hardware indicators, not measured-edge captures. The actual blink
 behavior must be confirmed on hardware before merging into main.
+
+## Multi-ID slave and passive filtered sniffer (feature branch)
+
+One LIN channel may respond as a slave on **multiple configured IDs**:
+
+```python
+lin.init(2, 19200)
+lin.slave_set(2, 0x12, b'\x11\x22\x33\x44')
+lin.slave_set(2, 0x23, b'\x55\x66')
+lin.slave_clear(2, 0x12)  # Remove only ID 0x12
+lin.slave_clear(2)        # Remove all slave IDs
+```
+
+Slave mode and sniffer mode are exclusive per channel. The sniffer is
+receive-only and stores **only configured IDs**, with expected data lengths
+and checksum modes. The two channels have independent configurations.
+
+```python
+lin.init(1, 19200)
+lin.sniffer_set(1, 0x12, 4)        # enhanced checksum (default)
+lin.sniffer_set(1, 0x23, 2, False) # classic checksum
+lin.sniffer(1, True)
+frame = lin.recv(1)               # or None if FIFO empty
+lin.sniffer(1, False)             # stop, retain rules and queued frames
+lin.sniffer_clear(1)              # remove all sniffer rules
+```
+
+The returned frame dict adds `status`: 0 means checksum correct; 1 means
+checksum mismatch. The FIFO retains `tic_start` and `tic_duration`.
+Frames for unconfigured IDs are ignored. A configured entry requires an exact
+data length: an incomplete response is not yet reported as a frame.
+Sniffer mode must be explicitly stopped before `lin.slave_set`; master
+operations on an active slave/sniffer channel are rejected. Configurations
+are volatile and lost on reset.
+
+### Hardware validation before release
+
+1. Compile `make firmware` and run `make test`; do not merge until verified.
+2. Verify two different slave IDs on LIN2 respond independently to LIN1 master.
+3. Remove one ID, then verify the other continues working.
+4. Activate sniffer on idle LIN2 and send configured frames from LIN1;
+   check data, checksum status and timestamps.
+5. Verify an unconfigured ID does not appear in the sniffer FIFO.
+6. Verify sniffer+slave on the same channel is rejected, and a master request
+   while sniffing fails without disrupting I2C.
+7. Test both directions, 0-byte and 8-byte frames, checksum failures,
+   FIFO overflow and repeated mode changes.
