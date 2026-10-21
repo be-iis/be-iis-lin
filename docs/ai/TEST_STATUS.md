@@ -15,6 +15,15 @@ Verified on real hardware:
 - slave_set
 - slave_clear
 - LIN1 master to LIN2 slave end-to-end
+- LIN2 master to LIN1 slave end-to-end
+- multiple slave IDs (three configured IDs tested, selective removal)
+- passive selected-ID sniffer with timestamps and checksum verification
+- sniffer/master/slave exclusive mode enforcement
+- mode change sniffer -> slave -> sniffer
+- 64-bit 1 MHz TIC, 16-bit timer rollover, cross-channel timestamps
+- 1000-frame master/slave test: 0 errors; 4465..4712 us measured duration
+- FIFO overflow retained most recent 15 entries, order tested
+- native SLAVE LED observed lit when configured
 - external LIN master pull-up on LIN1
 - beiis-lind SOCK_SEQPACKET path end-to-end
 - classic and enhanced request through beiis-lind
@@ -22,13 +31,12 @@ Verified on real hardware:
 
 Not yet fully verified/implemented:
 
-- LIN2 master pull-up direction as a separate release test
 - alternate baud rates
 - deliberately induced timeout
 - deliberately induced checksum failure
-- simultaneous dual-channel traffic
-- passive RX/sniffer queue
-- multiple slave IDs per channel
+- truly simultaneous dual-channel traffic (independent sequential tests passed)
+- malformed-frame and checksum-error injection for passive sniffer
+- passive reception of unknown-length or unconfigured frames
 - slave receive of master-published data
 - scheduler
 - sleep/wakeup
