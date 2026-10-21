@@ -33,6 +33,10 @@ The Unix socket exists only on Linux. The STM32 sees I2C, not the socket.
 - master transmit
 - master request
 - classic and enhanced checksum
+- multiple simultaneous slave response IDs per channel (up to 64)
+- passive selected-ID LIN sniffer with configured frame length and checksum
+- 64-bit shared 1 MHz TIC, timestamped 15-entry-per-channel FIFOs
+- native active-low LED indicators (MASTER/SLAVE/TX/RX)
 - slave response
 - MicroPython scripting
 - I2C Raw-REPL transport
@@ -87,7 +91,7 @@ Install the Linux daemon:
 sudo bash scripts/install-daemon.sh
 ```
 
-See `docs/human/` for build, flashing, host and LIN API details.
+See the [complete MicroPython command reference](docs/human/LIN_API.md) for all commands, example programs, TIC and monitoring. For public German and English documentation see [LIN HAT Wiki](https://www.be-iis.eu/wiki/hpp-lin/overview/), including [command reference](https://www.be-iis.eu/wiki/hpp-lin/commands/) and [TIC](https://www.be-iis.eu/wiki/hpp-lin/tic/).
 
 ## License and attribution
 
