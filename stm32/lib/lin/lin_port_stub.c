@@ -18,3 +18,7 @@ __attribute__((weak)) int lin_port_slave_set(uint8_t channel,uint8_t id,const ui
 __attribute__((weak)) int lin_port_slave_clear(uint8_t channel) {
     (void)channel; return -1;
 }
+
+__attribute__((weak)) uint64_t lin_port_tic_now(void) { return 0; }
+__attribute__((weak)) void lin_port_frame_push(uint8_t channel, const lin_frame_t *frame) { (void)channel; (void)frame; }
+__attribute__((weak)) bool lin_port_frame_pop(uint8_t channel, lin_frame_t *frame) { (void)channel; (void)frame; return false; }
