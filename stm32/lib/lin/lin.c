@@ -40,6 +40,8 @@ static lin_result_t send_header(uint8_t channel,uint8_t id,uint32_t timeout_ms) 
 
 lin_result_t lin_master_send(uint8_t channel,const lin_frame_t *f,lin_checksum_mode_t mode,uint32_t timeout_ms) {
     if(!valid_channel(channel)||!f||f->id>0x3f||f->len>8) return LIN_ERR_ARG;
+    lin_port_led_master(channel);
+    lin_port_led_tx(channel);
     uint64_t start = lin_port_tic_now();
     lin_result_t r=send_header(channel,f->id,timeout_ms);
     if(r!=LIN_OK) return r;
@@ -62,6 +64,7 @@ lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_check
     uint8_t b[9];
     if(lin_port_rx(channel,b,len+1,timeout_ms)!=0) return LIN_ERR_TIMEOUT;
     if(b[len]!=lin_checksum(lin_make_pid(id),b,len,mode)) return LIN_ERR_CHECKSUM;
+    lin_port_led_rx(channel);
     out->id=id; out->len=len; memcpy(out->data,b,len);
     out->tic_start=start;
     out->tic_duration=(uint32_t)(lin_port_tic_now()-start);
@@ -71,12 +74,16 @@ lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_check
 
 lin_result_t lin_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode) {
     if(!valid_channel(channel)||id>0x3f||!data||len>8) return LIN_ERR_ARG;
-    return lin_port_slave_set(channel,id,data,len,mode)==0?LIN_OK:LIN_ERR_IO;
+    if (lin_port_slave_set(channel,id,data,len,mode)!=0) return LIN_ERR_IO;
+    lin_port_led_slave(channel,true);
+    return LIN_OK;
 }
 
 lin_result_t lin_slave_clear(uint8_t channel) {
     if(!valid_channel(channel)) return LIN_ERR_ARG;
-    return lin_port_slave_clear(channel)==0?LIN_OK:LIN_ERR_IO;
+    if (lin_port_slave_clear(channel)!=0) return LIN_ERR_IO;
+    lin_port_led_slave(channel,false);
+    return LIN_OK;
 }
 
 
@@ -84,5 +91,7 @@ lin_result_t lin_master_request_raw(uint8_t channel,uint8_t id,uint8_t *buf,size
     if(!valid_channel(channel)||!buf||id>0x3f||len==0||len>9) return LIN_ERR_ARG;
     lin_result_t r=send_header(channel,id,timeout_ms);
     if(r!=LIN_OK) return r;
-    return lin_port_rx(channel,buf,len,timeout_ms)==0?LIN_OK:LIN_ERR_TIMEOUT;
+    if (lin_port_rx(channel,buf,len,timeout_ms)!=0) return LIN_ERR_TIMEOUT;
+    lin_port_led_rx(channel);
+    return LIN_OK;
 }
