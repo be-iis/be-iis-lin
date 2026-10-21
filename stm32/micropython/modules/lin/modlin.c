@@ -66,14 +66,40 @@ static mp_obj_t mod_lin_slave_set(size_t n,const mp_obj_t *a) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lin_slave_set_obj,3,4,mod_lin_slave_set);
 
-static mp_obj_t mod_lin_slave_clear(mp_obj_t channel_obj) {
-    uint8_t channel=(uint8_t)mp_obj_get_int(channel_obj);
-    int r=lin_slave_clear(channel);
+static mp_obj_t mod_lin_slave_clear(size_t n,const mp_obj_t *a) {
+    uint8_t channel=(uint8_t)mp_obj_get_int(a[0]);
+    int r=n==2 ? lin_slave_remove(channel,(uint8_t)mp_obj_get_int(a[1])) : lin_slave_clear(channel);
     if(r!=LIN_OK) mp_raise_OSError(-r);
     return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_slave_clear_obj,mod_lin_slave_clear);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lin_slave_clear_obj,1,2,mod_lin_slave_clear);
 
+
+
+static mp_obj_t mod_lin_sniffer_set(size_t n,const mp_obj_t *a) {
+    uint8_t channel=(uint8_t)mp_obj_get_int(a[0]);
+    uint8_t id=(uint8_t)mp_obj_get_int(a[1]);
+    uint8_t len=(uint8_t)mp_obj_get_int(a[2]);
+    lin_checksum_mode_t m=(n>3&&!mp_obj_is_true(a[3]))?LIN_CHECKSUM_CLASSIC:LIN_CHECKSUM_ENHANCED;
+    int r=lin_sniffer_set(channel,id,len,m);
+    if(r!=LIN_OK) mp_raise_OSError(-r);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mod_lin_sniffer_set_obj,3,4,mod_lin_sniffer_set);
+
+static mp_obj_t mod_lin_sniffer_clear(mp_obj_t channel_obj) {
+    int r=lin_sniffer_clear((uint8_t)mp_obj_get_int(channel_obj));
+    if(r!=LIN_OK) mp_raise_OSError(-r);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(mod_lin_sniffer_clear_obj,mod_lin_sniffer_clear);
+
+static mp_obj_t mod_lin_sniffer(mp_obj_t channel_obj,mp_obj_t enable_obj) {
+    int r=lin_sniffer_enable((uint8_t)mp_obj_get_int(channel_obj),mp_obj_is_true(enable_obj));
+    if(r!=LIN_OK) mp_raise_OSError(-r);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(mod_lin_sniffer_obj,mod_lin_sniffer);
 
 static mp_obj_t mod_lin_tic(void) {
     return mp_obj_new_int_from_ull(lin_port_tic_now());
@@ -81,12 +107,13 @@ static mp_obj_t mod_lin_tic(void) {
 static MP_DEFINE_CONST_FUN_OBJ_0(mod_lin_tic_obj, mod_lin_tic);
 
 static mp_obj_t frame_to_dict(const lin_frame_t *f) {
-    mp_obj_t d = mp_obj_new_dict(5);
+    mp_obj_t d = mp_obj_new_dict(6);
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_id), mp_obj_new_int(f->id));
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_data), mp_obj_new_bytes(f->data, f->len));
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_len), mp_obj_new_int(f->len));
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_tic_start), mp_obj_new_int_from_ull(f->tic_start));
     mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_tic_duration), mp_obj_new_int_from_uint(f->tic_duration));
+    mp_obj_dict_store(d, MP_OBJ_NEW_QSTR(MP_QSTR_status), mp_obj_new_int(f->status));
     return d;
 }
 
@@ -110,6 +137,9 @@ static const mp_rom_map_elem_t globals_table[]={
     {MP_ROM_QSTR(MP_QSTR_request_raw),MP_ROM_PTR(&mod_lin_request_raw_obj)},
     {MP_ROM_QSTR(MP_QSTR_slave_set),MP_ROM_PTR(&mod_lin_slave_set_obj)},
     {MP_ROM_QSTR(MP_QSTR_slave_clear),MP_ROM_PTR(&mod_lin_slave_clear_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sniffer_set),MP_ROM_PTR(&mod_lin_sniffer_set_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sniffer_clear),MP_ROM_PTR(&mod_lin_sniffer_clear_obj)},
+    {MP_ROM_QSTR(MP_QSTR_sniffer),MP_ROM_PTR(&mod_lin_sniffer_obj)},
 };
 static MP_DEFINE_CONST_DICT(globals,globals_table);
 const mp_obj_module_t lin_module={.base={&mp_type_module},.globals=(mp_obj_dict_t*)&globals};
