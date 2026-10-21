@@ -15,6 +15,151 @@
 #define BEIIS_IRQ_PRI_I2C IRQ_PRI_I2C
 #endif
 
+
+/* TIM6 is reserved for the BE-IIS 1 MHz monotonic timebase.
+ * One 16-bit overflow every 65.536 ms; software extends it to 64 bits.
+ */
+#define LIN_FIFO_DEPTH (16)
+
+/*
+ * Native LED controller. Pins are active-low and completely independent
+ * of the MicroPython scheduler. TIM6 updates every 65.536 ms, so a 50 ms
+ * pulse is guaranteed visible (actual on time: 50..115.536 ms).
+ * The slave-mode LED is persistent until slave_clear().
+ */
+#define BEIIS_LED_MIN_ON_US (50000u)
+typedef enum { LED_MASTER = 0, LED_SLAVE, LED_TX, LED_RX, LED_COUNT } lin_led_t;
+typedef struct {
+    GPIO_TypeDef *port;
+    uint16_t pin;
+} lin_led_pin_t;
+static const lin_led_pin_t lin_led_pins[2][LED_COUNT] = {
+    { {GPIOA,GPIO_PIN_6}, {GPIOA,GPIO_PIN_10}, {GPIOB,GPIO_PIN_1}, {GPIOA,GPIO_PIN_5} },
+    { {GPIOA,GPIO_PIN_15}, {GPIOB,GPIO_PIN_5}, {GPIOB,GPIO_PIN_4}, {GPIOB,GPIO_PIN_3} },
+};
+static volatile uint32_t led_until[2][LED_COUNT];
+static volatile uint8_t led_pulsing[2][LED_COUNT];
+
+static void led_write(unsigned channel, lin_led_t led, bool on) {
+    const lin_led_pin_t *p = &lin_led_pins[channel][led];
+    p->port->BSRR = on ? ((uint32_t)p->pin << 16) : p->pin;
+}
+
+static void led_init(void) {
+    GPIO_InitTypeDef g = {0};
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    // Preload inactive output levels before changing pin direction.
+    GPIOA->BSRR = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15;
+    GPIOB->BSRR = GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    g.Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15;
+    HAL_GPIO_Init(GPIOA, &g);
+    g.Pin = GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    HAL_GPIO_Init(GPIOB, &g);
+}
+
+static void led_pulse(uint8_t channel, lin_led_t led) {
+    if (channel < 1 || channel > 2) return;
+    unsigned i = channel - 1;
+    uint32_t now = (uint32_t)lin_port_tic_now();
+    // A 32-bit deadline is safe because expiry is checked every 65 ms.
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    led_until[i][led] = now + BEIIS_LED_MIN_ON_US;
+    led_pulsing[i][led] = 1;
+    led_write(i, led, true);
+    if (!primask) __enable_irq();
+}
+void lin_port_led_master(uint8_t channel) { led_pulse(channel, LED_MASTER); }
+void lin_port_led_tx(uint8_t channel) { led_pulse(channel, LED_TX); }
+void lin_port_led_rx(uint8_t channel) { led_pulse(channel, LED_RX); }
+void lin_port_led_slave(uint8_t channel, bool enabled) {
+    if (channel < 1 || channel > 2) return;
+    led_write(channel - 1, LED_SLAVE, enabled);
+}
+static void led_update(uint32_t now) {
+    for (unsigned i = 0; i < 2; ++i) {
+        for (unsigned j = 0; j < LED_COUNT; ++j) {
+            if (j == LED_SLAVE || !led_pulsing[i][j]) continue;
+            if ((int32_t)(now - led_until[i][j]) >= 0) {
+                led_pulsing[i][j] = 0;
+                led_write(i, (lin_led_t)j, false);
+            }
+        }
+    }
+}
+
+static volatile uint64_t lin_tic_high;
+static lin_frame_t lin_fifo[2][LIN_FIFO_DEPTH];
+static volatile uint8_t lin_fifo_head[2];
+static volatile uint8_t lin_fifo_tail[2];
+
+static void beiis_tic_init(void) {
+    __HAL_RCC_TIM6_CLK_ENABLE();
+    TIM6->CR1 = 0;
+    TIM6->PSC = (SystemCoreClock / 1000000u) - 1u;
+    TIM6->ARR = 0xffffu;
+    TIM6->EGR = TIM_EGR_UG;
+    TIM6->SR = 0;
+    TIM6->DIER = TIM_DIER_UIE;
+    NVIC_SetPriority(TIM6_IRQn, 1);
+    NVIC_EnableIRQ(TIM6_IRQn);
+    TIM6->CR1 = TIM_CR1_CEN;
+}
+
+// Called by the G0B0-specific MicroPython IRQ shim.
+void beiis_lin_tim6_irq(void) {
+    if (TIM6->SR & TIM_SR_UIF) {
+        TIM6->SR = ~TIM_SR_UIF;
+        lin_tic_high += 65536u;
+        led_update((uint32_t)lin_tic_high + (uint16_t)TIM6->CNT);
+    }
+}
+
+uint64_t lin_port_tic_now(void) {
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    uint64_t high = lin_tic_high;
+    uint16_t low = (uint16_t)TIM6->CNT;
+    if (TIM6->SR & TIM_SR_UIF) {
+        // Update happened before the snapshot, but its IRQ is pending.
+        high += 65536u;
+        low = (uint16_t)TIM6->CNT;
+    }
+    if (!primask) __enable_irq();
+    return high + low;
+}
+
+void lin_port_frame_push(uint8_t channel, const lin_frame_t *frame) {
+    if (channel < 1 || channel > 2 || !frame) return;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    unsigned i = channel - 1;
+    uint8_t next = (uint8_t)((lin_fifo_head[i] + 1) % LIN_FIFO_DEPTH);
+    // Drop the oldest frame if the producer outpaces the consumer.
+    if (next == lin_fifo_tail[i]) {
+        lin_fifo_tail[i] = (uint8_t)((lin_fifo_tail[i] + 1) % LIN_FIFO_DEPTH);
+    }
+    lin_fifo[i][lin_fifo_head[i]] = *frame;
+    lin_fifo_head[i] = next;
+    if (!primask) __enable_irq();
+}
+
+bool lin_port_frame_pop(uint8_t channel, lin_frame_t *frame) {
+    if (channel < 1 || channel > 2 || !frame) return false;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    unsigned i = channel - 1;
+    bool found = lin_fifo_tail[i] != lin_fifo_head[i];
+    if (found) {
+        *frame = lin_fifo[i][lin_fifo_tail[i]];
+        lin_fifo_tail[i] = (uint8_t)((lin_fifo_tail[i] + 1) % LIN_FIFO_DEPTH);
+    }
+    if (!primask) __enable_irq();
+    return found;
+}
+
 static UART_HandleTypeDef lin_uart1;
 static UART_HandleTypeDef lin_uart2;
 
@@ -23,6 +168,8 @@ typedef enum {
     LIN_SLAVE_WAIT_SYNC,
     LIN_SLAVE_WAIT_PID,
     LIN_SLAVE_TX,
+    LIN_SLAVE_WAIT_TC,
+    LIN_SNIFFER_RX,
 } lin_slave_state_t;
 
 typedef struct {
@@ -35,9 +182,39 @@ typedef struct {
     uint8_t tx[9];
     volatile uint8_t tx_len;
     volatile uint8_t tx_pos;
+    uint64_t tic_start;
+    volatile bool sniffer_enabled;
+    uint8_t sniffer_len;
+    uint8_t sniffer_pos;
+    uint8_t sniffer_pid;
+    uint8_t sniffer_data[9];
+    lin_checksum_mode_t sniffer_checksum;
 } lin_slave_ctx_t;
 
+typedef struct {
+    bool enabled;
+    uint8_t len;
+    uint8_t data[8];
+    lin_checksum_mode_t checksum_mode;
+} lin_slave_entry_t;
+typedef struct {
+    bool enabled;
+    uint8_t len;
+    lin_checksum_mode_t checksum_mode;
+} lin_sniffer_entry_t;
+static lin_slave_entry_t slave_entries[2][64];
+static lin_sniffer_entry_t sniffer_entries[2][64];
 static lin_slave_ctx_t lin_slave[2];
+
+static bool has_slaves(unsigned i) {
+    for (unsigned id=0; id<64; ++id) if (slave_entries[i][id].enabled) return true;
+    return false;
+}
+bool lin_port_master_allowed(uint8_t channel) {
+    if (channel<1 || channel>2) return false;
+    unsigned i=channel-1;
+    return !lin_slave[i].sniffer_enabled && !has_slaves(i);
+}
 
 static volatile uint8_t i2c_reg;
 static volatile uint8_t i2c_expect_reg = 1;
@@ -108,6 +285,8 @@ static void beiis_i2c_target_init(void) {
 
 void BEIIS_LIN_HAT_board_early_init(void) {
     beiis_gpio_init();
+    led_init();
+    beiis_tic_init();
     beiis_i2c_target_init();
 }
 
@@ -282,48 +461,93 @@ static lin_slave_ctx_t *lin_slave_ctx(uint8_t channel) {
     return &lin_slave[channel - 1];
 }
 
-int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode) {
+
+static void lin_listen_mode(uint8_t channel, bool enable) {
     UART_HandleTypeDef *h = lin_handle(channel);
-    lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
-    if (!h || !ctx || !data || len > 8 || id > 0x3f || h->gState == HAL_UART_STATE_RESET) return -1;
-
-    uint32_t primask = __get_PRIMASK();
-    __disable_irq();
-
-    ctx->id = id;
-    ctx->len = (uint8_t)len;
-    memcpy(ctx->data, data, len);
-    ctx->checksum_mode = mode;
-    ctx->tx_len = 0;
-    ctx->tx_pos = 0;
-    ctx->state = LIN_SLAVE_WAIT_BREAK;
-    ctx->enabled = true;
-
-    USART_TypeDef *u = h->Instance;
-    u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
-    u->CR2 |= USART_CR2_LBDIE;
-    u->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
-
-    IRQn_Type irqn = channel == 1 ? USART1_IRQn : USART2_IRQn;
-    NVIC_SetPriority(irqn, IRQ_PRI_UART);
-    NVIC_EnableIRQ(irqn);
-
-    if (!primask) __enable_irq();
+    if (!h || h->gState == HAL_UART_STATE_RESET) return;
+    USART_TypeDef *u=h->Instance;
+    u->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
+    if (enable) {
+        u->ICR=USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF | USART_ICR_TCCF;
+        u->CR2 |= USART_CR2_LBDIE;
+        u->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
+        IRQn_Type irq=channel==1 ? USART1_IRQn : USART2_IRQn;
+        NVIC_SetPriority(irq, IRQ_PRI_UART);
+        NVIC_EnableIRQ(irq);
+    } else {
+        u->CR2 &= ~USART_CR2_LBDIE;
+        u->CR1 &= ~USART_CR1_RXNEIE_RXFNEIE;
+    }
+}
+int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode) {
+    UART_HandleTypeDef *h=lin_handle(channel);
+    if(channel<1||channel>2||id>63||len>8||!data||!h||h->gState==HAL_UART_STATE_RESET) return -1;
+    unsigned i=channel-1;
+    uint32_t key=__get_PRIMASK(); __disable_irq();
+    if (lin_slave[i].sniffer_enabled) { if(!key)__enable_irq(); return -2; }
+    lin_slave_entry_t *e=&slave_entries[i][id];
+    e->enabled=false;
+    e->len=(uint8_t)len;
+    memcpy(e->data,data,len);
+    e->checksum_mode=mode;
+    e->enabled=true;
+    lin_slave[i].enabled=true;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,true);
+    lin_port_led_slave(channel,true);
+    if(!key)__enable_irq();
     return 0;
 }
-
+int lin_port_slave_remove(uint8_t channel,uint8_t id) {
+    if(channel<1||channel>2||id>63) return -1;
+    uint32_t key=__get_PRIMASK(); __disable_irq();
+    unsigned i=channel-1;
+    slave_entries[i][id].enabled=false;
+    bool active=has_slaves(i);
+    lin_slave[i].enabled=active;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,active || lin_slave[i].sniffer_enabled);
+    lin_port_led_slave(channel,active);
+    if(!key)__enable_irq();
+    return 0;
+}
 int lin_port_slave_clear(uint8_t channel) {
-    UART_HandleTypeDef *h = lin_handle(channel);
-    lin_slave_ctx_t *ctx = lin_slave_ctx(channel);
-    if (!h || !ctx) return -1;
-
-    ctx->enabled = false;
-    ctx->state = LIN_SLAVE_WAIT_BREAK;
-    ctx->tx_len = 0;
-    ctx->tx_pos = 0;
-
-    h->Instance->CR2 &= ~USART_CR2_LBDIE;
-    h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE);
+    if(channel<1||channel>2) return -1;
+    uint32_t key=__get_PRIMASK(); __disable_irq();
+    unsigned i=channel-1;
+    memset(slave_entries[i],0,sizeof(slave_entries[i]));
+    lin_slave[i].enabled=false;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,lin_slave[i].sniffer_enabled);
+    lin_port_led_slave(channel,false);
+    if(!key)__enable_irq();
+    return 0;
+}
+int lin_port_sniffer_set(uint8_t channel,uint8_t id,uint8_t len,lin_checksum_mode_t mode) {
+    if(channel<1||channel>2||id>63||len>8) return -1;
+    uint32_t key=__get_PRIMASK();__disable_irq();
+    lin_sniffer_entry_t *e=&sniffer_entries[channel-1][id];
+    e->len=len; e->checksum_mode=mode; e->enabled=true;
+    if(!key)__enable_irq();
+    return 0;
+}
+int lin_port_sniffer_clear(uint8_t channel) {
+    if(channel<1||channel>2) return -1;
+    uint32_t key=__get_PRIMASK();__disable_irq();
+    memset(sniffer_entries[channel-1],0,sizeof(sniffer_entries[0]));
+    if(!key)__enable_irq();
+    return 0;
+}
+int lin_port_sniffer_enable(uint8_t channel,bool enable) {
+    UART_HandleTypeDef *h=lin_handle(channel);
+    if(channel<1||channel>2||!h||h->gState==HAL_UART_STATE_RESET) return -1;
+    unsigned i=channel-1;
+    uint32_t key=__get_PRIMASK();__disable_irq();
+    if(enable && has_slaves(i)) {if(!key)__enable_irq();return -2;}
+    lin_slave[i].sniffer_enabled=enable;
+    lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
+    lin_listen_mode(channel,enable || has_slaves(i));
+    if(!key)__enable_irq();
     return 0;
 }
 
@@ -335,7 +559,14 @@ void beiis_lin_uart_irq(uint8_t channel) {
     USART_TypeDef *u = h->Instance;
     uint32_t isr = u->ISR;
 
-    if (!ctx->enabled) {
+    if (!ctx->enabled && !ctx->sniffer_enabled) {
+        // A stale TC/TXE interrupt must not keep the CPU in an IRQ storm.
+        // Master transactions use blocking HAL UART operations and do not
+        // expect our slave IRQ handler to service TX interrupts.
+        u->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
+        if (isr & USART_ISR_TC) {
+            u->ICR = USART_ICR_TCCF;
+        }
         if (isr & USART_ISR_RXNE_RXFNE) {
             (void)u->RDR;
         }
@@ -345,8 +576,18 @@ void beiis_lin_uart_irq(uint8_t channel) {
         return;
     }
 
+    // TCIE is only valid in WAIT_TC. If the state was changed by a
+    // break/reconfiguration, clear the stale interrupt instead of
+    // continuously re-entering the UART ISR.
+    if ((u->CR1 & USART_CR1_TCIE) && ctx->state != LIN_SLAVE_WAIT_TC) {
+        u->CR1 &= ~USART_CR1_TCIE;
+        u->ICR = USART_ICR_TCCF;
+    }
+
     if (isr & USART_ISR_LBDF) {
         u->ICR = USART_ICR_LBDCF;
+        ctx->tic_start = lin_port_tic_now();
+        lin_port_led_rx(channel);
         ctx->state = LIN_SLAVE_WAIT_SYNC;
         ctx->tx_pos = 0;
         ctx->tx_len = 0;
@@ -358,12 +599,27 @@ void beiis_lin_uart_irq(uint8_t channel) {
         if (ctx->state == LIN_SLAVE_WAIT_SYNC) {
             ctx->state = (v == 0x55) ? LIN_SLAVE_WAIT_PID : LIN_SLAVE_WAIT_BREAK;
         } else if (ctx->state == LIN_SLAVE_WAIT_PID) {
-            if (lin_pid_valid(v) && ((v & 0x3f) == ctx->id)) {
+            uint8_t id=v & 0x3f;
+            if (lin_pid_valid(v) && ctx->sniffer_enabled && sniffer_entries[channel-1][id].enabled) {
+                lin_sniffer_entry_t *entry=&sniffer_entries[channel-1][id];
+                ctx->id=id;
+                ctx->sniffer_pid=v;
+                ctx->sniffer_len=entry->len;
+                ctx->sniffer_checksum=entry->checksum_mode;
+                ctx->sniffer_pos=0;
+                ctx->state=LIN_SNIFFER_RX;
+            } else if (lin_pid_valid(v) && !ctx->sniffer_enabled && slave_entries[channel-1][id].enabled) {
+                lin_slave_entry_t *entry=&slave_entries[channel-1][id];
+                ctx->id=id;
+                ctx->len=entry->len;
+                memcpy(ctx->data,entry->data,ctx->len);
+                ctx->checksum_mode=entry->checksum_mode;
                 memcpy(ctx->tx, ctx->data, ctx->len);
                 ctx->tx[ctx->len] = lin_checksum(v, ctx->data, ctx->len, ctx->checksum_mode);
                 ctx->tx_len = ctx->len + 1;
                 ctx->tx_pos = 0;
                 ctx->state = LIN_SLAVE_TX;
+                lin_port_led_tx(channel);
 
                 // Arm TXE interrupt only. Do not write TDR here because
                 // 'isr' is a snapshot from before the PID was processed; using
@@ -371,6 +627,22 @@ void beiis_lin_uart_irq(uint8_t channel) {
                 u->CR1 |= USART_CR1_TXEIE_TXFNFIE;
             } else {
                 ctx->state = LIN_SLAVE_WAIT_BREAK;
+            }
+        } else if (ctx->state == LIN_SNIFFER_RX) {
+            if (ctx->sniffer_pos < (uint8_t)(ctx->sniffer_len+1)) {
+                ctx->sniffer_data[ctx->sniffer_pos++]=v;
+            }
+            if (ctx->sniffer_pos == (uint8_t)(ctx->sniffer_len+1)) {
+                lin_frame_t frame={0};
+                frame.id=ctx->id;
+                frame.len=ctx->sniffer_len;
+                memcpy(frame.data,ctx->sniffer_data,frame.len);
+                uint8_t expected=lin_checksum(ctx->sniffer_pid,frame.data,frame.len,ctx->sniffer_checksum);
+                frame.status=(ctx->sniffer_data[frame.len]==expected) ? 0 : 1;
+                frame.tic_start=ctx->tic_start;
+                frame.tic_duration=(uint32_t)(lin_port_tic_now()-frame.tic_start);
+                lin_port_frame_push(channel,&frame);
+                ctx->state=LIN_SLAVE_WAIT_BREAK;
             }
         }
     }
@@ -380,8 +652,24 @@ void beiis_lin_uart_irq(uint8_t channel) {
             u->TDR = ctx->tx[ctx->tx_pos++];
         } else {
             u->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
-            ctx->state = LIN_SLAVE_WAIT_BREAK;
+            ctx->state = LIN_SLAVE_WAIT_TC;
+            u->ICR = USART_ICR_TCCF;
+            u->CR1 |= USART_CR1_TCIE;
         }
+    }
+
+    if ((u->ISR & USART_ISR_TC) && (u->CR1 & USART_CR1_TCIE)
+        && ctx->state == LIN_SLAVE_WAIT_TC) {
+        u->CR1 &= ~USART_CR1_TCIE;
+        u->ICR = USART_ICR_TCCF;
+        lin_frame_t frame = {0};
+        frame.id = ctx->id;
+        frame.len = ctx->len;
+        memcpy(frame.data, ctx->data, ctx->len);
+        frame.tic_start = ctx->tic_start;
+        frame.tic_duration = (uint32_t)(lin_port_tic_now() - frame.tic_start);
+        lin_port_frame_push(channel, &frame);
+        ctx->state = LIN_SLAVE_WAIT_BREAK;
     }
 
     uint32_t err = u->ISR;
