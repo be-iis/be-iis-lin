@@ -379,6 +379,7 @@ int lin_port_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len
     USART_TypeDef *u = h->Instance;
     u->ICR = USART_ICR_LBDCF | USART_ICR_ORECF | USART_ICR_FECF | USART_ICR_NECF;
     u->CR2 |= USART_CR2_LBDIE;
+    u->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
     u->CR1 |= USART_CR1_RXNEIE_RXFNEIE;
 
     IRQn_Type irqn = channel == 1 ? USART1_IRQn : USART2_IRQn;
@@ -413,6 +414,13 @@ void beiis_lin_uart_irq(uint8_t channel) {
     uint32_t isr = u->ISR;
 
     if (!ctx->enabled) {
+        // A stale TC/TXE interrupt must not keep the CPU in an IRQ storm.
+        // Master transactions use blocking HAL UART operations and do not
+        // expect our slave IRQ handler to service TX interrupts.
+        u->CR1 &= ~(USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
+        if (isr & USART_ISR_TC) {
+            u->ICR = USART_ICR_TCCF;
+        }
         if (isr & USART_ISR_RXNE_RXFNE) {
             (void)u->RDR;
         }
@@ -420,6 +428,14 @@ void beiis_lin_uart_irq(uint8_t channel) {
             u->ICR = USART_ICR_LBDCF;
         }
         return;
+    }
+
+    // TCIE is only valid in WAIT_TC. If the state was changed by a
+    // break/reconfiguration, clear the stale interrupt instead of
+    // continuously re-entering the UART ISR.
+    if ((u->CR1 & USART_CR1_TCIE) && ctx->state != LIN_SLAVE_WAIT_TC) {
+        u->CR1 &= ~USART_CR1_TCIE;
+        u->ICR = USART_ICR_TCCF;
     }
 
     if (isr & USART_ISR_LBDF) {
