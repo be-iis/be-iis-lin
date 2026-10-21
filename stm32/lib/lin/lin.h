@@ -46,3 +46,9 @@ lin_result_t lin_slave_clear(uint8_t channel);
 uint64_t lin_port_tic_now(void);
 void lin_port_frame_push(uint8_t channel, const lin_frame_t *frame);
 bool lin_port_frame_pop(uint8_t channel, lin_frame_t *frame);
+
+// Built-in activity LEDs (active low), driven only by the native firmware.
+void lin_port_led_master(uint8_t channel);
+void lin_port_led_tx(uint8_t channel);
+void lin_port_led_rx(uint8_t channel);
+void lin_port_led_slave(uint8_t channel, bool enabled);
