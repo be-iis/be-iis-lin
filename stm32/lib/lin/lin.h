@@ -20,6 +20,8 @@ typedef struct {
     uint8_t id;
     uint8_t len;
     uint8_t data[8];
+    uint64_t tic_start;
+    uint32_t tic_duration;
 } lin_frame_t;
 
 uint8_t lin_make_pid(uint8_t id);
@@ -39,3 +41,8 @@ lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_check
 lin_result_t lin_master_request_raw(uint8_t channel,uint8_t id,uint8_t *buf,size_t len,uint32_t timeout_ms);
 lin_result_t lin_slave_set(uint8_t channel,uint8_t id,const uint8_t *data,size_t len,lin_checksum_mode_t mode);
 lin_result_t lin_slave_clear(uint8_t channel);
+
+// Shared 1 MHz monotonic clock and per-channel completed-frame FIFO.
+uint64_t lin_port_tic_now(void);
+void lin_port_frame_push(uint8_t channel, const lin_frame_t *frame);
+bool lin_port_frame_pop(uint8_t channel, lin_frame_t *frame);
