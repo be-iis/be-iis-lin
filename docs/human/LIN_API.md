@@ -77,3 +77,19 @@ completed slave responses enter the queue. The existing `lin.send()` and
    both channels' timestamps share the same increasing clock.
 6. Exercise back-to-back frames, queue overflow, baud rates and
    unexpected/invalid frames before considering the feature production-ready.
+
+## Native LIN activity LEDs (experimental feature branch)
+
+The STM32 C firmware owns all eight active-low LED pins. MicroPython does not
+need to service them. Activity LEDs have a minimum visible on-time of 50 ms;
+TIM6 periodically turns them off (actual on-time may be up to ~116 ms).
+
+| LED | LIN1 | LIN2 | Meaning |
+|---|---|---|---|
+| MASTER | PA6 | PA15 | Master transaction activity pulse |
+| SLAVE | PA10 | PB5 | Constant while a slave response is configured |
+| TX | PB1 | PB4 | Master send/request header or slave-response TX pulse |
+| RX | PA5 | PB3 | Master response reception or slave break detected |
+
+LEDs are hardware indicators, not measured-edge captures. The actual blink
+behavior must be confirmed on hardware before merging into main.
