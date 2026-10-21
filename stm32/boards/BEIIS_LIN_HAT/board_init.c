@@ -506,7 +506,7 @@ int lin_port_slave_remove(uint8_t channel,uint8_t id) {
     bool active=has_slaves(i);
     lin_slave[i].enabled=active;
     lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
-    lin_listen_mode(channel,active);
+    lin_listen_mode(channel,active || lin_slave[i].sniffer_enabled);
     lin_port_led_slave(channel,active);
     if(!key)__enable_irq();
     return 0;
@@ -518,7 +518,7 @@ int lin_port_slave_clear(uint8_t channel) {
     memset(slave_entries[i],0,sizeof(slave_entries[i]));
     lin_slave[i].enabled=false;
     lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
-    lin_listen_mode(channel,false);
+    lin_listen_mode(channel,lin_slave[i].sniffer_enabled);
     lin_port_led_slave(channel,false);
     if(!key)__enable_irq();
     return 0;
@@ -546,7 +546,7 @@ int lin_port_sniffer_enable(uint8_t channel,bool enable) {
     if(enable && has_slaves(i)) {if(!key)__enable_irq();return -2;}
     lin_slave[i].sniffer_enabled=enable;
     lin_slave[i].state=LIN_SLAVE_WAIT_BREAK;
-    lin_listen_mode(channel,enable);
+    lin_listen_mode(channel,enable || has_slaves(i));
     if(!key)__enable_irq();
     return 0;
 }
