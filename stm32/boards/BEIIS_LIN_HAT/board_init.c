@@ -20,6 +20,76 @@
  * One 16-bit overflow every 65.536 ms; software extends it to 64 bits.
  */
 #define LIN_FIFO_DEPTH (16)
+
+/*
+ * Native LED controller. Pins are active-low and completely independent
+ * of the MicroPython scheduler. TIM6 updates every 65.536 ms, so a 50 ms
+ * pulse is guaranteed visible (actual on time: 50..115.536 ms).
+ * The slave-mode LED is persistent until slave_clear().
+ */
+#define BEIIS_LED_MIN_ON_US (50000u)
+typedef enum { LED_MASTER = 0, LED_SLAVE, LED_TX, LED_RX, LED_COUNT } lin_led_t;
+typedef struct {
+    GPIO_TypeDef *port;
+    uint16_t pin;
+} lin_led_pin_t;
+static const lin_led_pin_t lin_led_pins[2][LED_COUNT] = {
+    { {GPIOA,GPIO_PIN_6}, {GPIOA,GPIO_PIN_10}, {GPIOB,GPIO_PIN_1}, {GPIOA,GPIO_PIN_5} },
+    { {GPIOA,GPIO_PIN_15}, {GPIOB,GPIO_PIN_5}, {GPIOB,GPIO_PIN_4}, {GPIOB,GPIO_PIN_3} },
+};
+static volatile uint32_t led_until[2][LED_COUNT];
+static volatile uint8_t led_pulsing[2][LED_COUNT];
+
+static void led_write(unsigned channel, lin_led_t led, bool on) {
+    const lin_led_pin_t *p = &lin_led_pins[channel][led];
+    p->port->BSRR = on ? ((uint32_t)p->pin << 16) : p->pin;
+}
+
+static void led_init(void) {
+    GPIO_InitTypeDef g = {0};
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    // Preload inactive output levels before changing pin direction.
+    GPIOA->BSRR = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15;
+    GPIOB->BSRR = GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    g.Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_10 | GPIO_PIN_15;
+    HAL_GPIO_Init(GPIOA, &g);
+    g.Pin = GPIO_PIN_1 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5;
+    HAL_GPIO_Init(GPIOB, &g);
+}
+
+static void led_pulse(uint8_t channel, lin_led_t led) {
+    if (channel < 1 || channel > 2) return;
+    unsigned i = channel - 1;
+    uint32_t now = (uint32_t)lin_port_tic_now();
+    // A 32-bit deadline is safe because expiry is checked every 65 ms.
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    led_until[i][led] = now + BEIIS_LED_MIN_ON_US;
+    led_pulsing[i][led] = 1;
+    led_write(i, led, true);
+    if (!primask) __enable_irq();
+}
+void lin_port_led_master(uint8_t channel) { led_pulse(channel, LED_MASTER); }
+void lin_port_led_tx(uint8_t channel) { led_pulse(channel, LED_TX); }
+void lin_port_led_rx(uint8_t channel) { led_pulse(channel, LED_RX); }
+void lin_port_led_slave(uint8_t channel, bool enabled) {
+    if (channel < 1 || channel > 2) return;
+    led_write(channel - 1, LED_SLAVE, enabled);
+}
+static void led_update(uint32_t now) {
+    for (unsigned i = 0; i < 2; ++i) {
+        for (unsigned j = 0; j < LED_COUNT; ++j) {
+            if (j == LED_SLAVE || !led_pulsing[i][j]) continue;
+            if ((int32_t)(now - led_until[i][j]) >= 0) {
+                led_pulsing[i][j] = 0;
+                led_write(i, (lin_led_t)j, false);
+            }
+        }
+    }
+}
+
 static volatile uint64_t lin_tic_high;
 static lin_frame_t lin_fifo[2][LIN_FIFO_DEPTH];
 static volatile uint8_t lin_fifo_head[2];
@@ -43,6 +113,7 @@ void beiis_lin_tim6_irq(void) {
     if (TIM6->SR & TIM_SR_UIF) {
         TIM6->SR = ~TIM_SR_UIF;
         lin_tic_high += 65536u;
+        led_update((uint32_t)lin_tic_high + (uint16_t)TIM6->CNT);
     }
 }
 
@@ -184,6 +255,7 @@ static void beiis_i2c_target_init(void) {
 
 void BEIIS_LIN_HAT_board_early_init(void) {
     beiis_gpio_init();
+    led_init();
     beiis_tic_init();
     beiis_i2c_target_init();
 }
@@ -441,6 +513,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
     if (isr & USART_ISR_LBDF) {
         u->ICR = USART_ICR_LBDCF;
         ctx->tic_start = lin_port_tic_now();
+        lin_port_led_rx(channel);
         ctx->state = LIN_SLAVE_WAIT_SYNC;
         ctx->tx_pos = 0;
         ctx->tx_len = 0;
@@ -458,6 +531,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
                 ctx->tx_len = ctx->len + 1;
                 ctx->tx_pos = 0;
                 ctx->state = LIN_SLAVE_TX;
+                lin_port_led_tx(channel);
 
                 // Arm TXE interrupt only. Do not write TDR here because
                 // 'isr' is a snapshot from before the PID was processed; using
