@@ -25,6 +25,11 @@ the Unix socket.
 Keep time-critical LIN operations in C. MicroPython is a scripting layer, not
 the timing engine.
 
+Firmware `main` includes selected-ID passive sniffing, multi-ID slave responses,
+shared 1 MHz 64-bit TIC timestamps and C-controlled LEDs. Sniffer and master/slave
+are exclusive per channel. FIFO stores 15 usable frames per channel and drops
+oldest on overflow. See `docs/human/LIN_API.md` for full supported commands.
+
 ## Flash
 
 - mboot: 0x08000000, 32 KiB
