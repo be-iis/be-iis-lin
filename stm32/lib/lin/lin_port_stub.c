@@ -27,3 +27,9 @@ __attribute__((weak)) void lin_port_led_master(uint8_t channel) { (void)channel;
 __attribute__((weak)) void lin_port_led_tx(uint8_t channel) { (void)channel; }
 __attribute__((weak)) void lin_port_led_rx(uint8_t channel) { (void)channel; }
 __attribute__((weak)) void lin_port_led_slave(uint8_t channel, bool enabled) { (void)channel; (void)enabled; }
+
+__attribute__((weak)) int lin_port_slave_remove(uint8_t channel,uint8_t id) { (void)channel; (void)id; return -1; }
+__attribute__((weak)) int lin_port_sniffer_set(uint8_t channel,uint8_t id,uint8_t len,lin_checksum_mode_t mode) { (void)channel; (void)id; (void)len; (void)mode; return -1; }
+__attribute__((weak)) int lin_port_sniffer_clear(uint8_t channel) { (void)channel; return -1; }
+__attribute__((weak)) int lin_port_sniffer_enable(uint8_t channel,bool enable) { (void)channel; (void)enable; return -1; }
+__attribute__((weak)) bool lin_port_master_allowed(uint8_t channel) { (void)channel; return true; }
