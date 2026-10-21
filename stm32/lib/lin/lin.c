@@ -69,7 +69,7 @@ lin_result_t lin_master_request(uint8_t channel,uint8_t id,uint8_t len,lin_check
     if(lin_port_rx(channel,b,len+1,timeout_ms)!=0) return LIN_ERR_TIMEOUT;
     if(b[len]!=lin_checksum(lin_make_pid(id),b,len,mode)) return LIN_ERR_CHECKSUM;
     lin_port_led_rx(channel);
-    out->id=id; out->len=len; memcpy(out->data,b,len);
+    out->id=id; out->len=len; out->status=0; memcpy(out->data,b,len);
     out->tic_start=start;
     out->tic_duration=(uint32_t)(lin_port_tic_now()-start);
     lin_port_frame_push(channel,out);
