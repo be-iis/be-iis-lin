@@ -15,6 +15,80 @@
 #define BEIIS_IRQ_PRI_I2C IRQ_PRI_I2C
 #endif
 
+
+/* TIM6 is reserved for the BE-IIS 1 MHz monotonic timebase.
+ * One 16-bit overflow every 65.536 ms; software extends it to 64 bits.
+ */
+#define LIN_FIFO_DEPTH (16)
+static volatile uint64_t lin_tic_high;
+static lin_frame_t lin_fifo[2][LIN_FIFO_DEPTH];
+static volatile uint8_t lin_fifo_head[2];
+static volatile uint8_t lin_fifo_tail[2];
+
+static void beiis_tic_init(void) {
+    __HAL_RCC_TIM6_CLK_ENABLE();
+    TIM6->CR1 = 0;
+    TIM6->PSC = (SystemCoreClock / 1000000u) - 1u;
+    TIM6->ARR = 0xffffu;
+    TIM6->EGR = TIM_EGR_UG;
+    TIM6->SR = 0;
+    TIM6->DIER = TIM_DIER_UIE;
+    NVIC_SetPriority(TIM6_IRQn, 1);
+    NVIC_EnableIRQ(TIM6_IRQn);
+    TIM6->CR1 = TIM_CR1_CEN;
+}
+
+// Called by the G0B0-specific MicroPython IRQ shim.
+void beiis_lin_tim6_irq(void) {
+    if (TIM6->SR & TIM_SR_UIF) {
+        TIM6->SR = ~TIM_SR_UIF;
+        lin_tic_high += 65536u;
+    }
+}
+
+uint64_t lin_port_tic_now(void) {
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    uint64_t high = lin_tic_high;
+    uint16_t low = (uint16_t)TIM6->CNT;
+    if (TIM6->SR & TIM_SR_UIF) {
+        // Update happened before the snapshot, but its IRQ is pending.
+        high += 65536u;
+        low = (uint16_t)TIM6->CNT;
+    }
+    if (!primask) __enable_irq();
+    return high + low;
+}
+
+void lin_port_frame_push(uint8_t channel, const lin_frame_t *frame) {
+    if (channel < 1 || channel > 2 || !frame) return;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    unsigned i = channel - 1;
+    uint8_t next = (uint8_t)((lin_fifo_head[i] + 1) % LIN_FIFO_DEPTH);
+    // Drop the oldest frame if the producer outpaces the consumer.
+    if (next == lin_fifo_tail[i]) {
+        lin_fifo_tail[i] = (uint8_t)((lin_fifo_tail[i] + 1) % LIN_FIFO_DEPTH);
+    }
+    lin_fifo[i][lin_fifo_head[i]] = *frame;
+    lin_fifo_head[i] = next;
+    if (!primask) __enable_irq();
+}
+
+bool lin_port_frame_pop(uint8_t channel, lin_frame_t *frame) {
+    if (channel < 1 || channel > 2 || !frame) return false;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    unsigned i = channel - 1;
+    bool found = lin_fifo_tail[i] != lin_fifo_head[i];
+    if (found) {
+        *frame = lin_fifo[i][lin_fifo_tail[i]];
+        lin_fifo_tail[i] = (uint8_t)((lin_fifo_tail[i] + 1) % LIN_FIFO_DEPTH);
+    }
+    if (!primask) __enable_irq();
+    return found;
+}
+
 static UART_HandleTypeDef lin_uart1;
 static UART_HandleTypeDef lin_uart2;
 
@@ -23,6 +97,7 @@ typedef enum {
     LIN_SLAVE_WAIT_SYNC,
     LIN_SLAVE_WAIT_PID,
     LIN_SLAVE_TX,
+    LIN_SLAVE_WAIT_TC,
 } lin_slave_state_t;
 
 typedef struct {
@@ -35,6 +110,7 @@ typedef struct {
     uint8_t tx[9];
     volatile uint8_t tx_len;
     volatile uint8_t tx_pos;
+    uint64_t tic_start;
 } lin_slave_ctx_t;
 
 static lin_slave_ctx_t lin_slave[2];
@@ -108,6 +184,7 @@ static void beiis_i2c_target_init(void) {
 
 void BEIIS_LIN_HAT_board_early_init(void) {
     beiis_gpio_init();
+    beiis_tic_init();
     beiis_i2c_target_init();
 }
 
@@ -323,7 +400,7 @@ int lin_port_slave_clear(uint8_t channel) {
     ctx->tx_pos = 0;
 
     h->Instance->CR2 &= ~USART_CR2_LBDIE;
-    h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE);
+    h->Instance->CR1 &= ~(USART_CR1_RXNEIE_RXFNEIE | USART_CR1_TXEIE_TXFNFIE | USART_CR1_TCIE);
     return 0;
 }
 
@@ -347,6 +424,7 @@ void beiis_lin_uart_irq(uint8_t channel) {
 
     if (isr & USART_ISR_LBDF) {
         u->ICR = USART_ICR_LBDCF;
+        ctx->tic_start = lin_port_tic_now();
         ctx->state = LIN_SLAVE_WAIT_SYNC;
         ctx->tx_pos = 0;
         ctx->tx_len = 0;
@@ -380,8 +458,24 @@ void beiis_lin_uart_irq(uint8_t channel) {
             u->TDR = ctx->tx[ctx->tx_pos++];
         } else {
             u->CR1 &= ~USART_CR1_TXEIE_TXFNFIE;
-            ctx->state = LIN_SLAVE_WAIT_BREAK;
+            ctx->state = LIN_SLAVE_WAIT_TC;
+            u->ICR = USART_ICR_TCCF;
+            u->CR1 |= USART_CR1_TCIE;
         }
+    }
+
+    if ((u->ISR & USART_ISR_TC) && (u->CR1 & USART_CR1_TCIE)
+        && ctx->state == LIN_SLAVE_WAIT_TC) {
+        u->CR1 &= ~USART_CR1_TCIE;
+        u->ICR = USART_ICR_TCCF;
+        lin_frame_t frame = {0};
+        frame.id = ctx->id;
+        frame.len = ctx->len;
+        memcpy(frame.data, ctx->data, ctx->len);
+        frame.tic_start = ctx->tic_start;
+        frame.tic_duration = (uint32_t)(lin_port_tic_now() - frame.tic_start);
+        lin_port_frame_push(channel, &frame);
+        ctx->state = LIN_SLAVE_WAIT_BREAK;
     }
 
     uint32_t err = u->ISR;
